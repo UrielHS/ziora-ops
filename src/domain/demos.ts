@@ -5,6 +5,8 @@ import { listDemoEvents } from "@/integrations/google/calendar";
 import { requireEnv } from "@/lib/env";
 import { toCity, upsertContact } from "./contacts";
 import { parseDemoEvent, type ParsedDemoEvent } from "./demo-calendar";
+import { advanceLead, logActivity, SYSTEM_ACTOR } from "./leads";
+import { fmtDateTime } from "@/lib/format";
 
 export type DemoInput = {
   externalId?: string;
@@ -21,6 +23,12 @@ export type DemoInput = {
   source: string;
   raw?: Record<string, unknown>;
 };
+
+/** Una demo con fecha avanza al lead a demo_agendada (solo hacia adelante) y queda en su timeline. */
+export async function leadDemoScheduled(db: Db, contactId: string, scheduledAt: Date, demoId?: string) {
+  await logActivity(db, { contactId, type: "demo", actor: SYSTEM_ACTOR, summary: `Demo agendada para ${fmtDateTime(scheduledAt)}`, meta: { demoId: demoId ?? null } });
+  await advanceLead(db, contactId, "demo_agendada", SYSTEM_ACTOR, { demoId: demoId ?? null });
+}
 
 /** Crea la demo y crea o completa el contacto en Ziora Ops. Idempotente por externalId. */
 export async function ingestDemo(db: Db, p: DemoInput) {
@@ -53,6 +61,7 @@ export async function ingestDemo(db: Db, p: DemoInput) {
     })
     .onConflictDoNothing()
     .returning({ id: demoRequests.id });
+  if (demo && p.scheduledAt) await leadDemoScheduled(db, contactId, p.scheduledAt, demo.id);
   return { contactId, demoId: demo?.id ?? null, duplicate: !demo };
 }
 
@@ -113,6 +122,8 @@ export async function applyWebhookDemo(db: Db, p: DemoInput & { status?: "schedu
   if (p.status === "cancelled") {
     if (existing && (existing.stage === "requested" || existing.stage === "scheduled")) {
       await db.update(demoRequests).set({ stage: "lost", lostReason: "Canceló la demo" }).where(eq(demoRequests.id, existing.id));
+      // El lead no retrocede: cancelar una demo solo queda en el timeline.
+      if (existing.contactId) await logActivity(db, { contactId: existing.contactId, type: "demo", actor: SYSTEM_ACTOR, summary: "Canceló la demo", meta: { demoId: existing.id } });
       return { result: "cancelled", demoId: existing.id };
     }
     return { result: "skipped", demoId: existing?.id ?? null };
@@ -131,6 +142,7 @@ export async function applyWebhookDemo(db: Db, p: DemoInput & { status?: "schedu
         ? { stage: "scheduled" as const, lostReason: null }
         : {}),
     }).where(eq(demoRequests.id, existing.id));
+    if (existing.contactId && p.scheduledAt) await leadDemoScheduled(db, existing.contactId, p.scheduledAt, existing.id);
     return { result: "rescheduled", demoId: existing.id };
   }
   return { result: "duplicate", demoId: existing.id };

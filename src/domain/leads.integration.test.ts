@@ -56,4 +56,58 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(acts.find((a) => a.direction === "entrante")?.summary).toBe("Dijo que sí le interesa");
     expect(acts.some((a) => a.type === "sistema" && a.summary.includes(someone.name))).toBe(true);
   });
+
+  it("demo agendada avanza al lead y cancelar no lo retrocede", async () => {
+    const { db } = await import("@/db");
+    const { contactActivities, contacts } = await import("@/db/schema");
+    const { applyWebhookDemo } = await import("./demos");
+    const { advanceLead } = await import("./leads");
+    const t = Date.now();
+    const email = `demo${t}@example.com`;
+    await applyWebhookDemo(db, { externalId: `x${t}`, fullName: "Demo Lead", email, scheduledAt: new Date(Date.now() + 86400000), source: "test" });
+    let [c] = await db.select().from(contacts).where(eq(contacts.email, email));
+    expect(c.leadStatus).toBe("demo_agendada");
+    await advanceLead(db, c.id, "en_trial", actor);
+    await applyWebhookDemo(db, { externalId: `x${t}`, fullName: "Demo Lead", email, source: "test", status: "cancelled" });
+    [c] = await db.select().from(contacts).where(eq(contacts.email, email));
+    expect(c.leadStatus).toBe("en_trial");
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, c.id));
+    expect(acts.filter((a) => a.type === "demo").map((a) => a.summary)).toEqual([expect.stringContaining("Demo agendada"), "Canceló la demo"]);
+  });
+
+  it("el sync de usuarios sube a en_trial y pago sin importar mayúsculas y nunca baja", async () => {
+    const { db } = await import("@/db");
+    const { appUsers, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { syncLeadStatusFromAppUsers } = await import("./leads");
+    const t = Date.now();
+    const email = `app${t}@example.com`;
+    const { id } = await upsertContact(db, { name: "App Lead", email, source: "manual", tags: ["lead"], leadStatus: "contactado" });
+    await db.insert(appUsers).values({ uid: `u${t}`, email: ` ${email.toUpperCase()} `, plan: "pro", status: "trialing", syncedAt: new Date() });
+    // La base local puede tener otros leads que también avanzan: se afirma sobre este contacto y cotas mínimas.
+    const status = async () => (await db.select({ s: contacts.leadStatus }).from(contacts).where(eq(contacts.id, id)))[0].s;
+    expect((await syncLeadStatusFromAppUsers(db)).trial).toBeGreaterThanOrEqual(1);
+    expect(await status()).toBe("en_trial");
+    await db.update(appUsers).set({ status: "active", mrrCents: 69900, currency: "mxn" }).where(eq(appUsers.uid, `u${t}`));
+    expect((await syncLeadStatusFromAppUsers(db)).paid).toBeGreaterThanOrEqual(1);
+    expect(await status()).toBe("pago");
+    await db.update(appUsers).set({ status: "trialing", mrrCents: null }).where(eq(appUsers.uid, `u${t}`));
+    expect(await syncLeadStatusFromAppUsers(db)).toEqual({ trial: 0, paid: 0 }); // ya nadie avanza; nunca se baja
+    expect(await status()).toBe("pago");
+  });
+
+  it("la baja de correo marca perdido:baja salvo a quien ya está en trial o pagando", async () => {
+    const { db } = await import("@/db");
+    const { contacts } = await import("@/db/schema");
+    const { optOut, upsertContact } = await import("./contacts");
+    const t = Date.now();
+    const a = await upsertContact(db, { name: "Baja A", email: `bajaa${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "contactado" });
+    const b = await upsertContact(db, { name: "Baja B", email: `bajab${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "pago" });
+    await optOut(db, a.id);
+    await optOut(db, b.id);
+    const [ca] = await db.select().from(contacts).where(eq(contacts.id, a.id));
+    const [cb] = await db.select().from(contacts).where(eq(contacts.id, b.id));
+    expect(ca).toMatchObject({ leadStatus: "perdido", lostReason: "baja" });
+    expect(cb.leadStatus).toBe("pago");
+  });
 });

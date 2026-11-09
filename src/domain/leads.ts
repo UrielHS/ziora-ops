@@ -2,11 +2,12 @@
  * Reglas del CRM de leads: el embudo, sus avances y el timeline de cada contacto.
  * Todo cambio de estado deja una actividad `cambio_estado`; nada se edita, solo se agrega.
  */
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
-import { contactActivities, contacts, type ActivityType, type LeadStatus } from "@/db/schema";
+import { appUsers, contactActivities, contacts, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
 import { LEAD_STATUS } from "@/lib/labels";
+import { isPaying } from "./app-users";
 
 /** Orden del embudo. `perdido` no está: es terminal y solo se pone a mano (o por baja). */
 export const LEAD_ORDER: LeadStatus[] = ["nuevo", "contactado", "respondio", "demo_agendada", "en_trial", "pago"];
@@ -114,4 +115,27 @@ export async function setNextAction(db: Dbx, contactId: string, next: { text: st
 export async function setPriority(db: Dbx, contactIds: string[], priority: 1 | 2 | 3 | null, _actor: Actor): Promise<void> {
   if (!contactIds.length) return;
   await db.update(contacts).set({ priority }).where(inArray(contacts.id, contactIds));
+}
+
+/**
+ * Cruza los usuarios de la app (snapshot de ziora-api) con los leads por correo y avanza: trial → en_trial, pagando → pago.
+ * Solo avanza; cuenta únicamente los leads que cambiaron. Las cuentas de prueba y las borradas no cuentan.
+ */
+export async function syncLeadStatusFromAppUsers(db: Dbx): Promise<{ trial: number; paid: number }> {
+  const prices = await db.select().from(planPrices);
+  const rows = await db
+    .select({ contactId: contacts.id, uid: appUsers.uid, plan: appUsers.plan, status: appUsers.status, mrrCents: appUsers.mrrCents, currency: appUsers.currency })
+    .from(appUsers)
+    .innerJoin(contacts, eq(contacts.email, sql`lower(trim(${appUsers.email}))`))
+    .where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false)));
+  let trial = 0, paid = 0;
+  for (const r of rows) {
+    const meta = { source: "app_users", uid: r.uid };
+    if (isPaying(r, prices)) {
+      if (await advanceLead(db, r.contactId, "pago", SYSTEM_ACTOR, meta)) paid++;
+    } else if (/trial/i.test(r.status)) {
+      if (await advanceLead(db, r.contactId, "en_trial", SYSTEM_ACTOR, meta)) trial++;
+    }
+  }
+  return { trial, paid };
 }

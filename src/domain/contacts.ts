@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { contactConsents, contacts, contactTagEnum, contactTags, type CityValue, type ContactSource, type ContactTag, type LeadStatus } from "@/db/schema";
 import { normalizePhoneE164 } from "./phone";
+import { logActivity, setLeadStatus, SYSTEM_ACTOR } from "./leads";
 import { eoContacts, eoContactTags, organizations } from "@/db/shared";
 
 export function normalizeEmail(email: string): string {
@@ -151,6 +152,10 @@ export async function importFromEventOps(db: Db, eventOpsIds: string[]) {
   return { created, completed, skipped: eventOpsIds.length - rows.length };
 }
 
+/**
+ * Baja de un canal: revoca el consentimiento y, si es un lead en trabajo (antes de trial), lo marca perdido con motivo "baja".
+ * A quien ya está en trial o pagando no se le cambia el estado por dejar de recibir marketing: solo queda en el timeline.
+ */
 export async function optOut(db: Db, contactId: string, channel = "email") {
   await db
     .insert(contactConsents)
@@ -159,6 +164,13 @@ export async function optOut(db: Db, contactId: string, channel = "email") {
       target: [contactConsents.contactId, contactConsents.channel],
       set: { optIn: false, optedOutAt: new Date() },
     });
+  const [c] = await db.select({ leadStatus: contacts.leadStatus }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+  if (!c?.leadStatus) return;
+  if (["en_trial", "pago", "perdido"].includes(c.leadStatus)) {
+    await logActivity(db, { contactId, type: "sistema", actor: SYSTEM_ACTOR, summary: `Baja de ${channel === "email" ? "correo" : channel}` });
+  } else {
+    await setLeadStatus(db, contactId, "perdido", SYSTEM_ACTOR, { lostReason: "baja" });
+  }
 }
 
 export async function optOutByEmail(db: Db, email: string) {
