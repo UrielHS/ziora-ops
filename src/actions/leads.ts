@@ -8,6 +8,7 @@ import { leadStatusEnum } from "@/db/schema";
 import {
   assignOwner, convertLeadToAccount, logActivity, markReplied, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
 } from "@/domain/leads";
+import { completePendingTouch, enroll, enrollMessage } from "@/domain/sequences";
 import { formAction, type ActionState } from "@/lib/action";
 import { todayISO } from "@/lib/format";
 import { requirePermission } from "@/lib/session";
@@ -52,6 +53,8 @@ const _setLeadStatus = formAction(z.object({ id, status, lostReason: z.string().
 
 const _recordTouch = formAction(z.object({ id, channel, summary: z.string().trim().max(500).optional() }), async (d) => {
   await recordTouch(db, d.id, d.channel, await actor(), d.summary ?? `Mensaje enviado por ${CHANNEL_LABEL[d.channel]}`);
+  // Si el toque era el paso pendiente de una secuencia (WhatsApp listo en Hoy), cuenta y avanza la cadencia.
+  if (d.channel === "whatsapp" || d.channel === "correo") await completePendingTouch(db, d.id, d.channel);
   refresh(d.id);
   return "Toque registrado";
 });
@@ -92,9 +95,15 @@ const _setPriority = formAction(z.object({ ids, priority: z.coerce.number().int(
   return "Prioridad actualizada";
 });
 
-/** Barra del kanban: el botón presionado (op) decide si se asigna dueño o se cambia prioridad a los seleccionados. */
-const _bulk = formAction(z.object({ ids, op: z.enum(["owner", "priority"]), ownerId: z.uuid().optional(), priority: z.coerce.number().int().min(1).max(3).optional() }), async (d) => {
+/** Barra del kanban: el botón presionado (op) decide si se asigna dueño, se cambia prioridad o se enrola en una secuencia a los seleccionados. */
+const _bulk = formAction(z.object({ ids, op: z.enum(["owner", "priority", "enroll"]), ownerId: z.uuid().optional(), priority: z.coerce.number().int().min(1).max(3).optional(), sequenceId: z.uuid().optional() }), async (d) => {
   const a = await actor();
+  if (d.op === "enroll") {
+    if (!d.sequenceId) throw new Error("Elige una secuencia");
+    const r = await enroll(db, d.ids, d.sequenceId, a);
+    refresh();
+    return enrollMessage(r);
+  }
   if (d.op === "owner") {
     await assignOwner(db, d.ids, d.ownerId ?? null, a);
     refresh();

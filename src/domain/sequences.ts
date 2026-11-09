@@ -122,6 +122,11 @@ export async function enroll(db: Dbx, contactIds: string[], sequenceId: string, 
   return { enrolled, skipped };
 }
 
+/** Resumen para el mensaje del action. */
+export function enrollMessage(r: EnrollResult): string {
+  return `${r.enrolled} lead(s) enrolado(s)` + (r.skipped.length ? ` · ${r.skipped.length} omitido(s) (ya enrolados o fuera de nuevo/contactado)` : "");
+}
+
 // ---------------------------------------------------------------------------
 // Correr el job
 // ---------------------------------------------------------------------------
