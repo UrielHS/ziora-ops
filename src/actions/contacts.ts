@@ -99,17 +99,21 @@ const _importLeads = formAction(
     file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB"),
     consentSource: z.enum(["evento_luma"]).optional(),
     ownerId: z.uuid().optional(),
+    sequenceId: z.uuid().optional(),
   }),
-  async ({ file, consentSource, ownerId }) => {
-    await requirePermission("contacts.import");
+  async ({ file, consentSource, ownerId, sequenceId }) => {
+    const { user } = await requirePermission("contacts.import");
     const { rows, skipped } = parseLeadSheet(await file.text());
     if (!rows.length) throw new Error("No encontré filas con correo o teléfono válido.");
-    const r = await importLeadSheet(db, rows, { consentSource: consentSource ?? null, ownerId: ownerId ?? null });
+    const r = await importLeadSheet(db, rows, {
+      consentSource: consentSource ?? null, ownerId: ownerId ?? null, sequenceId: sequenceId ?? null, actor: { userId: user.id, label: user.name },
+    });
     revalidatePath("/contacts");
     revalidatePath("/leads", "layout");
     const soloTel = rows.filter((x) => !x.email).length;
     const skip = skipped.length ? ` · ${skipped.length} filas saltadas (${skipped.slice(0, 3).map((x) => `fila ${x.line}: ${x.reason}`).join("; ")}${skipped.length > 3 ? "…" : ""})` : "";
-    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${soloTel ? ` · ${soloTel} solo con teléfono` : ""}${skip}.`;
+    const enrolados = sequenceId ? ` · ${r.enrolled} enrolado(s) en la secuencia` : "";
+    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${soloTel ? ` · ${soloTel} solo con teléfono` : ""}${enrolados}${skip}.`;
   },
 );
 

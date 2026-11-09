@@ -7,6 +7,8 @@
 import type { Db } from "@/db";
 import type { ContactTag } from "@/db/schema";
 import { normalizeEmail, toCity, upsertContact } from "./contacts";
+import type { Actor } from "./leads";
+import { enroll } from "./sequences";
 import { parseCsv, slug } from "./marketing";
 import { normalizePhoneE164 } from "./phone";
 
@@ -121,6 +123,10 @@ export type ImportLeadOptions = {
   ownerId?: string | null;
   /** Base legal del contacto. "evento_luma" registra consentimiento de correo y WhatsApp por el registro al evento. */
   consentSource?: "evento_luma" | null;
+  /** Secuencia en la que se enrola a todos los de la hoja (creados y completados); `enroll` omite a los que no están en nuevo/contactado. */
+  sequenceId?: string | null;
+  /** Quién importa; queda en la actividad "Enrolado en…". */
+  actor?: Actor | null;
 };
 
 const LUMA_EVIDENCE = "Registro en Luma · Mexico Tech Week 2026 (panel 26-oct / taller 30-oct)";
@@ -128,6 +134,7 @@ const LUMA_EVIDENCE = "Registro en Luma · Mexico Tech Week 2026 (panel 26-oct /
 /** Crea o completa cada lead (por correo o, si no hay, por teléfono). Nunca duplica ni pisa datos que ya existían. */
 export async function importLeadSheet(db: Db, rows: LeadRow[], opts: ImportLeadOptions = {}) {
   let created = 0, completed = 0;
+  const ids: string[] = [];
   const consents = opts.consentSource === "evento_luma"
     ? (["email", "whatsapp"] as const).map((channel) => ({ channel, source: "evento_luma", evidence: LUMA_EVIDENCE }))
     : [];
@@ -142,6 +149,12 @@ export async function importLeadSheet(db: Db, rows: LeadRow[], opts: ImportLeadO
       leadStatus: "nuevo", priority: r.priority, segment: r.segment, ownerId: opts.ownerId, consents,
     });
     if (res.created) created++; else completed++;
+    ids.push(res.id);
   }
-  return { created, completed };
+  let enrolled = 0;
+  if (opts.sequenceId) {
+    const r = await enroll(db, ids, opts.sequenceId, opts.actor ?? { userId: opts.ownerId ?? null, label: "Importación de hoja" });
+    enrolled = r.enrolled;
+  }
+  return { created, completed, enrolled };
 }

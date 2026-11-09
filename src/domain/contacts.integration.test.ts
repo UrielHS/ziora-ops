@@ -53,8 +53,8 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
 2,Dani Hoja,dani${t}@example.com,52999,Psicólogo/a en clínica o consultorio,6 a 10,Cdmx,Sí
 3,Eli Hoja,eli${t}@example.com,52888,Otro,0,Monterrey,`;
     const { rows } = parseLeadSheet(csv);
-    expect(await importLeadSheet(db, rows)).toEqual({ created: 1, completed: 1 });
-    expect(await importLeadSheet(db, rows)).toEqual({ created: 0, completed: 2 });
+    expect(await importLeadSheet(db, rows)).toEqual({ created: 1, completed: 1, enrolled: 0 });
+    expect(await importLeadSheet(db, rows)).toEqual({ created: 0, completed: 2, enrolled: 0 });
 
     const [dani] = await db.select().from(contacts).where(eq(contacts.email, `dani${t}@example.com`));
     expect(dani).toMatchObject({ name: "Dani Ya Existía", phone: "+52 1", jobTitle: "Psicólogo/a en clínica o consultorio", patientsPerWeek: "6 a 10", city: "cdmx", cityName: "Cdmx" });
@@ -74,7 +74,7 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
 2,🟠 WARM-A,Tel Uno,,55${t}
 `;
     const r1 = await importLeadSheet(db, parseLeadSheet(csv).rows, { consentSource: "evento_luma" });
-    expect(r1).toEqual({ created: 1, completed: 0 });
+    expect(r1).toEqual({ created: 1, completed: 0, enrolled: 0 });
     const [c] = await db.select().from(contacts).where(eq(contacts.phoneE164, `5255${t}`));
     expect(c).toMatchObject({ email: null, leadStatus: "nuevo", priority: 2, segment: "WARM-A" });
     const cons = await db.select().from(contactConsents).where(eq(contactConsents.contactId, c.id));
@@ -82,7 +82,7 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
 
     await db.update(contacts).set({ leadStatus: "contactado", priority: 1 }).where(eq(contacts.id, c.id));
     const r2 = await importLeadSheet(db, parseLeadSheet(csv.replace(`55${t}`, `+52 55 ${t}`)).rows, { consentSource: "evento_luma" });
-    expect(r2).toEqual({ created: 0, completed: 1 });
+    expect(r2).toEqual({ created: 0, completed: 1, enrolled: 0 });
     const [again] = await db.select().from(contacts).where(eq(contacts.id, c.id));
     expect(again).toMatchObject({ leadStatus: "contactado", priority: 1 });
   });

@@ -6,7 +6,7 @@ import { Avatar, Badge, btn, Card, cn, Field, inputCls, PageHeader, Select } fro
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
-import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
+import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
 import { DeleteButton } from "@/components/ui/delete-button";
@@ -50,6 +50,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
     .leftJoin(contactConsents, and(eq(contactConsents.contactId, contacts.id), eq(contactConsents.channel, "email")))
     .where(and(...where));
   const users = await listUsers();
+  const activeSequences = await db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name);
   const [rows, [{ total }], [stats]] = await Promise.all([
     base.orderBy(desc(contacts.updatedAt)).limit(PAGE).offset((page - 1) * PAGE),
     db.select({ total: count() }).from(contacts).leftJoin(contactConsents, and(eq(contactConsents.contactId, contacts.id), eq(contactConsents.channel, "email"))).where(and(...where)),
@@ -96,6 +97,9 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
               </Field>
               <Field label="Dueño de los leads nuevos">
                 <Select name="ownerId" placeholder="Sin dueño" options={userOptions(users)} />
+              </Field>
+              <Field label="Enrolar en secuencia" hint="Solo entran los que quedan en Nuevo o Contactado; el primer correo sale en la siguiente corrida (10:00 CDMX).">
+                <Select name="sequenceId" placeholder="Sin secuencia" options={activeSequences.map((s) => [s.id, s.name] as [string, string])} />
               </Field>
               <Submit>Importar</Submit>
             </ActionForm>

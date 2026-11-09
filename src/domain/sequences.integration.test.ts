@@ -157,6 +157,27 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     expect(await s.seqMod.completePendingTouch(s.db, a.id, "whatsapp", NOW)).toBe(false);
   });
 
+  it("importar con secuencia enrola a los nuevos y a los que ya estaban en nuevo, no a los que ya pagaron", async () => {
+    const s = await setup();
+    const { importLeadSheet } = await import("./lead-sheet");
+    const { seq } = await s.mkSequence();
+    const nuevo = await s.mkLead();
+    const pagado = await s.mkLead();
+    await s.db.update(s.schema.contacts).set({ leadStatus: "pago" }).where(eq(s.schema.contacts.id, pagado.id));
+    const t = Date.now();
+    const rows = [
+      { line: 2, name: "Nueva Importada", email: `cad${t}-imp@example.com` },
+      { line: 3, name: "Ya Nuevo", email: nuevo.email! },
+      { line: 4, name: "Ya Pagó", email: pagado.email! },
+    ];
+    const r = await importLeadSheet(s.db, rows, { sequenceId: seq.id, actor: s.actor });
+    expect(r).toMatchObject({ created: 1, completed: 2, enrolled: 2 });
+    const activos = await s.db.select().from(s.schema.sequenceEnrollments)
+      .where(and(eq(s.schema.sequenceEnrollments.sequenceId, seq.id), eq(s.schema.sequenceEnrollments.status, "activa")));
+    expect(activos).toHaveLength(2);
+    expect(activos.map((e) => e.contactId)).not.toContain(pagado.id);
+  });
+
   it("una respuesta detiene la secuencia antes del siguiente paso", async () => {
     const s = await setup();
     const { seq } = await s.mkSequence();
