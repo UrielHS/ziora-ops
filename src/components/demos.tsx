@@ -6,6 +6,7 @@ import type { UserOption } from "@/db/queries";
 import type { demoRequests } from "@/db/schema";
 import { CITY, DEMO_STAGE } from "@/lib/labels";
 import { fmtDate, fmtDateTime, waLink } from "@/lib/format";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type Demo = typeof demoRequests.$inferSelect & { city?: string | null };
 
@@ -97,6 +98,9 @@ export function DemoCard({ d, users }: { d: Demo; users: UserOption[] }) {
           </Field>
           <Submit>Guardar</Submit>
         </ActionForm>
+        <div className="border-t border-line pt-3">
+          <DeleteButton kind="demo" id={d.id} what={`la demo de ${d.fullName}`} warning="El contacto se queda en Contactos. Los seguimientos ligados a la demo se quedan, sin el enlace." label="Eliminar demo" />
+        </div>
       </div>
     </Modal>
   );

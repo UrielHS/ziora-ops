@@ -3,6 +3,7 @@ import { btn, Field, inputCls, Select } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { adCampaigns, socialAccounts } from "@/db/schema";
 import { SOCIAL_PLATFORM } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type Account = typeof socialAccounts.$inferSelect;
 
@@ -28,6 +29,11 @@ export function AccountButton({ a, trigger = "+ Cuenta", triggerClass }: { a?: A
         {a?.tokenEncrypted && <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="clearToken" className="h-4 w-4" /> Quitar el token guardado</label>}
         <Submit>Guardar</Submit>
       </ActionForm>
+      {a && (
+        <div className="mt-3 border-t border-line pt-3">
+          <DeleteButton kind="social_account" id={a.id} what={`la cuenta ${a.handle ?? ""}`} warning="También se borran sus métricas diarias y publicaciones guardadas. Las campañas de anuncios se quedan." label="Eliminar cuenta" />
+        </div>
+      )}
     </Modal>
   );
 }

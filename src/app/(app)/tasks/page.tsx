@@ -10,6 +10,7 @@ import { listEpics, listSprints, listUsers } from "@/db/queries";
 import { tasks } from "@/db/schema";
 import { fmtDate } from "@/lib/format";
 import { TASK_STATUS } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +114,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                   <Progress value={done} max={st.length} />
                   <span className="whitespace-nowrap text-[11px] font-semibold text-muted">{done}/{st.length}</span>
                 </div>
+                <DeleteButton kind="sprint" id={s.id} what={`el sprint ${s.name}`} warning="Sus tareas regresan al backlog." className="mt-2" label="Eliminar sprint" />
                 {s.status !== "active" && (
                   <form action={activateSprint} className="mt-3">
                     <input type="hidden" name="id" value={s.id} />

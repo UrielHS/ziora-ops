@@ -4,6 +4,7 @@ import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { followups } from "@/db/schema";
 import { fmtDate, relative, todayISO } from "@/lib/format";
 import { FOLLOWUP_CHANNEL, FOLLOWUP_REASON, HEALTH } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type Followup = typeof followups.$inferSelect;
 type Opt = { id: string; name: string };
@@ -84,6 +85,7 @@ export function FollowupRow({ f, subject, owner, canEdit }: { f: Followup; subje
           </form>
         </>
       )}
+      {canEdit && <DeleteButton kind="followup" id={f.id} what={`el seguimiento "${f.title}"`} label="" />}
     </div>
   );
 }

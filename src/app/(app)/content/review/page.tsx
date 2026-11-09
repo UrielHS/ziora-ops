@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { CheckCircle2, CircleDashed, ExternalLink, MessageSquareWarning } from "lucide-react";
 import { reviewPiece } from "@/actions/content";
-import { pillarColor, ReviewBadges } from "@/components/content";
+import { channelsOf, pillarColor, ReviewBadges } from "@/components/content";
 import { Badge, btn, Card, cn, Empty, Field, inputCls, PageHeader } from "@/components/ui";
 import { ActionForm, Submit } from "@/components/ui/form";
 import { db } from "@/db";
@@ -22,11 +22,15 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const access = await requireAccess();
   const canReview = can(access, "content.review");
-  const [inReview, returned] = await Promise.all([
-    db.select().from(contentPieces).where(eq(contentPieces.status, "legal_review")).orderBy(asc(contentPieces.publishOn)),
+  const [candidates, returned] = await Promise.all([
+    // En revisión, y programadas que todavía no están aprobadas.
+    db.select().from(contentPieces)
+      .where(or(eq(contentPieces.status, "legal_review"), and(eq(contentPieces.status, "scheduled"), isNotNull(contentPieces.reviewRequestedAt))))
+      .orderBy(asc(contentPieces.publishOn)),
     db.select().from(contentPieces).where(inArray(contentPieces.status, ["draft"])).orderBy(desc(contentPieces.updatedAt)).limit(30),
   ]);
-  const reviews = await reviewsForPieces(db, [...inReview, ...returned].map((p) => p.id));
+  const reviews = await reviewsForPieces(db, [...candidates, ...returned].map((p) => p.id));
+  const inReview = candidates.filter((p) => p.status === "legal_review" || !reviews.get(p.id)?.complete);
   const returnedWithChanges = returned.filter((p) => reviews.get(p.id)?.changesRequested);
   const owners = await db.select({ id: users.id, name: users.name }).from(users);
   const ownerName = (id: string | null) => owners.find((o) => o.id === id)?.name ?? "Sin responsable";
@@ -43,7 +47,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Marketing"
         title="Revisión de contenido"
-        subtitle={`Cada pieza necesita la aprobación de ${CONTENT_REVIEWER_ROLES.map((r) => OPS_ROLE[r].label).join(", ")} y la checklist legal completa antes de programarse.`}
+        subtitle="Cada pieza necesita la aprobación del director clínico (o del CEO si él no puede) y la checklist legal completa antes de aprobarse o publicarse. Se puede programar antes: se ve como «Sin revisar»."
         actions={<Link href="/content" className={btn("ghost")}>← Calendario</Link>}
       />
 
@@ -89,7 +93,7 @@ function ReviewCard({ p, review, owner, canReview, myId }: { p: Piece; review: P
         <div className="flex flex-col gap-3 p-5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ background: pillarColor(p.pillar) }} />
-            <span className="text-xs text-muted">{CONTENT_PILLAR[p.pillar].label} · {CONTENT_CHANNEL[p.channel]} · {p.format}</span>
+            <span className="text-xs text-muted">{CONTENT_PILLAR[p.pillar].label} · {channelsOf(p).map((c) => CONTENT_CHANNEL[c]).join(", ")} · {p.format}{p.status === "scheduled" && " · Programada"}</span>
             <Badge tone="gray">{p.publishOn ? `Sale ${fmtDate(p.publishOn)}` : "Sin fecha"}</Badge>
             {p.risk !== "low" && <Badge tone={p.risk === "high" ? "red" : "amber"}>Riesgo {p.risk === "high" ? "alto" : "medio"}</Badge>}
             {!p.legalChecklistOk && <Badge tone="gray">Checklist legal pendiente</Badge>}
@@ -110,7 +114,7 @@ function ReviewCard({ p, review, owner, canReview, myId }: { p: Piece; review: P
               return (
                 <span key={role} className="flex items-center gap-2 text-sm">
                   {ok ? <CheckCircle2 className="h-4 w-4 text-emerald" /> : <CircleDashed className="h-4 w-4 text-faint" />}
-                  {OPS_ROLE[role].label}
+                  {OPS_ROLE[role].label}{role === "ceo" ? " (opcional; sustituye al director clínico)" : " (obligatoria)"}
                 </span>
               );
             })}

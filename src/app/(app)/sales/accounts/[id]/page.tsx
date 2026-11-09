@@ -13,6 +13,7 @@ import { fmtDate, money, todayISO, waLink } from "@/lib/format";
 import { ACCOUNT_TYPE, BILLING_PERIOD, CONTRACT_STATUS, DEAL_STAGE } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import { requirePagePermission } from "@/lib/session";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 const ghost = btn("ghost", "sm");
@@ -75,6 +76,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
                 </span>
                 {p.email && <a href={`mailto:${p.email}`} className="rounded-full p-1.5 text-muted hover:bg-mint hover:text-emerald" title={p.email}><Mail className="h-4 w-4" /></a>}
                 {waLink(p.phone) && <a href={waLink(p.phone)!} target="_blank" rel="noreferrer" className="rounded-full p-1.5 text-muted hover:bg-mint hover:text-emerald" title={p.phone!}><Phone className="h-4 w-4" /></a>}
+                {canEdit && <DeleteButton kind="account_contact" id={`${id}:${p.id}`} what={`a ${p.name} de esta cuenta`} warning="Sigue en Contactos; solo deja de estar ligado a la cuenta." label="Quitar" />}
               </div>
             ))}
           </div>

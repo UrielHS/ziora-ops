@@ -12,9 +12,11 @@ describe("can", () => {
     expect(can(a, "sales.manage")).toBe(false);
   });
 
-  it("ventas revisa contenido y gestiona contratos, pero no clasifica tickets", () => {
+  it("ventas gestiona contratos, pero ya no revisa contenido ni clasifica tickets", () => {
     const a = { isAdmin: false, roles: ["sales" as const] };
-    expect(can(a, "content.review")).toBe(true);
+    expect(can(a, "content.review")).toBe(false);
+    expect(can({ isAdmin: false, roles: ["clinical_director"] }, "content.review")).toBe(true);
+    expect(can({ isAdmin: false, roles: ["ceo"] }, "content.review")).toBe(true);
     expect(can(a, "sales.manage")).toBe(true);
     expect(can(a, "tickets.triage")).toBe(false);
   });

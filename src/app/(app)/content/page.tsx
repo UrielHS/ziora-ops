@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { and, asc, gte, isNull, lte } from "drizzle-orm";
-import { NewPieceButton, PieceChip, pillarColor } from "@/components/content";
-import { btn, Card, cn, PageHeader, PanelHeader, Progress } from "@/components/ui";
+import { saveMix } from "@/actions/content";
+import { channelsOf, NewPieceButton, PieceChip, pillarColor } from "@/components/content";
+import { btn, Card, cn, Field, inputCls, PageHeader, PanelHeader, Progress } from "@/components/ui";
+import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { reviewsForPieces } from "@/db/content-review";
 import { listUsers } from "@/db/queries";
 import { contentPieces } from "@/db/schema";
+import { actualMix, getContentMix, MIX_GROUPS } from "@/domain/content-mix";
 import { todayISO } from "@/lib/format";
 import { CONTENT_PILLAR } from "@/lib/labels";
+import { can } from "@/lib/permissions";
+import { requireAccess } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -28,33 +33,30 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
   const today = todayISO();
   const [y, m] = (sp.m ?? today.slice(0, 7)).split("-").map(Number);
   const cells = monthGrid(y, m - 1);
-  const users = await listUsers();
+  const [users, access, mixTarget] = await Promise.all([listUsers(), requireAccess(), getContentMix(db)]);
+  const canEditMix = can(access, "content.manage");
   const [pieces, undated] = await Promise.all([
     db.select().from(contentPieces).where(and(gte(contentPieces.publishOn, cells[0]), lte(contentPieces.publishOn, cells[41]))).orderBy(asc(contentPieces.publishOn)),
     db.select().from(contentPieces).where(isNull(contentPieces.publishOn)).orderBy(asc(contentPieces.createdAt)),
   ]);
-  const reviews = await reviewsForPieces(db, [...pieces, ...undated].filter((p) => p.status === "legal_review").map((p) => p.id));
+  // Revisión de lo que está en revisión y de lo programado que sigue pendiente ("Sin revisar").
+  const reviews = await reviewsForPieces(db, [...pieces, ...undated].filter((p) => p.reviewRequestedAt && ["legal_review", "scheduled"].includes(p.status)).map((p) => p.id));
   const inMonth = pieces.filter((p) => p.publishOn!.slice(0, 7) === `${y}-${String(m).padStart(2, "0")}` && p.status !== "discarded");
-  const edu = inMonth.filter((p) => ["ia_psicoterapia", "estudios", "roi", "psicoterapia_moderna"].includes(p.pillar)).length;
-  const memes = inMonth.filter((p) => p.pillar === "memes").length;
-  const prod = inMonth.filter((p) => p.pillar === "producto").length;
-  const total = inMonth.length || 1;
-  const mix = [
-    { label: "Educación y datos", value: Math.round((edu / total) * 100), target: 60 },
-    { label: "Memes", value: Math.round((memes / total) * 100), target: 25 },
-    { label: "Producto", value: Math.round((prod / total) * 100), target: 15 },
-  ];
+  const real = actualMix(inMonth);
+  const mix = MIX_GROUPS.map((g) => ({ key: g.key, label: g.label, value: real[g.key], target: mixTarget[g.key] }));
   // Cadencia de la semana actual vs plan (sección 6.1)
   const weekStart = new Date(`${today}T12:00:00Z`);
   weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7));
   const ws = weekStart.toISOString().slice(0, 10);
   const we = new Date(weekStart.getTime() + 6 * 86400000).toISOString().slice(0, 10);
   const week = pieces.filter((p) => p.publishOn! >= ws && p.publishOn! <= we && p.status !== "discarded");
+  // Una pieza cuenta en cada canal donde se publica.
+  const on = (p: (typeof week)[number], c: string) => channelsOf(p).includes(c as never);
   const cadence = [
-    { label: "IG posts", value: week.filter((p) => p.channel === "instagram" && p.format !== "reel").length, target: 4 },
-    { label: "IG reels", value: week.filter((p) => p.channel === "instagram" && p.format === "reel").length, target: 3 },
-    { label: "TikTok", value: week.filter((p) => p.channel === "tiktok").length, target: 3 },
-    { label: "Grupos FB", value: week.filter((p) => p.channel === "facebook_group").length, target: 2 },
+    { label: "IG posts", value: week.filter((p) => on(p, "instagram") && p.format !== "reel").length, target: 4 },
+    { label: "IG reels", value: week.filter((p) => on(p, "instagram") && p.format === "reel").length, target: 3 },
+    { label: "TikTok", value: week.filter((p) => on(p, "tiktok")).length, target: 3 },
+    { label: "Grupos FB", value: week.filter((p) => on(p, "facebook_group")).length, target: 2 },
   ];
   const prev = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
   const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
@@ -70,7 +72,23 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="p-5">
-          <p className="label">Mezcla del mes vs plan (60 / 25 / 15)</p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="label">Mezcla del mes vs plan ({mix.map((x) => x.target).join(" / ")})</p>
+            {canEditMix && (
+              <Modal trigger="Editar" triggerClass={btn("ghost", "sm")} title="Meta de la mezcla del mes">
+                <ActionForm action={saveMix}>
+                  <p className="text-sm text-muted">Porcentaje de piezas del mes para cada grupo. Deben sumar 100.</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {mix.map((x) => (
+                      <Field key={x.key} label={x.label}><input name={x.key} type="number" min={0} max={100} step={1} required defaultValue={x.target} className={inputCls} /></Field>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-faint">Educación: IA y psicoterapia, estudios y psicoterapia moderna · Entretenimiento: memes · Datos del producto: producto y ROI.</p>
+                  <Submit>Guardar meta</Submit>
+                </ActionForm>
+              </Modal>
+            )}
+          </div>
           <div className="mt-3 flex flex-col gap-3">
             {mix.map((x) => (
               <div key={x.label} className="flex items-center gap-3">
@@ -107,6 +125,8 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
           {Object.entries(CONTENT_PILLAR).map(([k, v]) => (
             <span key={k} className="flex items-center gap-1.5 text-[11px] text-muted"><span className="h-2 w-2 rounded-full" style={{ background: pillarColor(k) }} />{v.label}</span>
           ))}
+          <span className="flex items-center gap-1.5 text-[11px] text-muted"><span className="h-2.5 w-3.5 rounded border border-[#E8B84A] bg-[#FFF8E6]" />Sin revisar</span>
+          <span className="flex items-center gap-1.5 text-[11px] text-muted"><span className="h-2.5 w-3.5 rounded border border-[#E4A4A4] bg-[#FDF1F1]" />Cambios pedidos</span>
         </div>
         <div className="overflow-x-auto p-5">
           <div className="grid min-w-[760px] grid-cols-7 overflow-hidden rounded-2xl border border-line">

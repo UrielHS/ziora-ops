@@ -11,6 +11,7 @@ import { relative } from "@/lib/format";
 import { CONTENT_CHANNEL, CONTENT_PILLAR, SUGGESTION_STATUS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import { requireAccess } from "@/lib/session";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,7 @@ export default async function SuggestionsPage({ searchParams }: { searchParams: 
                       <Submit variant="danger">Descartar</Submit>
                     </ActionForm>
                   </Modal>
+                  <DeleteButton kind="suggestion" id={s.id} what={`la sugerencia "${s.title}"`} className="ml-auto" />
                 </div>
               )}
             </SuggestionCard>
@@ -85,6 +87,7 @@ export default async function SuggestionsPage({ searchParams }: { searchParams: 
               <SuggestionCard key={s.id} s={s} author={name(s.authorId)}>
                 {s.decisionNote && <p className="text-xs text-muted"><b>{name(s.decidedBy)}:</b> {s.decisionNote}</p>}
                 {s.status === "accepted" && <Link href="/content" className="text-xs font-semibold text-emerald">Ver en el calendario ↗</Link>}
+                {canDecide && <DeleteButton kind="suggestion" id={s.id} what={`la sugerencia "${s.title}"`} warning={s.status === "accepted" ? "La pieza y la tarea que se crearon con ella se quedan." : undefined} />}
               </SuggestionCard>
             ))}
           </div>

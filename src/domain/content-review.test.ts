@@ -5,33 +5,36 @@ const chris = { reviewerId: "c", reviewerRoles: ["ceo" as const] };
 const rafa = { reviewerId: "r", reviewerRoles: ["clinical_director" as const] };
 const euri = { reviewerId: "e", reviewerRoles: ["sales" as const] };
 
-describe("summarizeReviews", () => {
-  it("sin revisiones faltan los tres roles", () => {
+describe("summarizeReviews: basta el director clínico o, si no puede, el CEO", () => {
+  it("sin revisiones falta el director clínico", () => {
     const s = summarizeReviews([]);
-    expect(s.missingRoles).toEqual(["ceo", "clinical_director", "sales"]);
+    expect(s.missingRoles).toEqual(["clinical_director"]);
     expect(s.complete).toBe(false);
   });
 
-  it("con dos aprobaciones falta el tercero", () => {
+  it("con la aprobación del director clínico está completa", () => {
+    const s = summarizeReviews([{ ...rafa, decision: "approved" }]);
+    expect(s).toMatchObject({ complete: true, missingRoles: [], approvedRoles: ["clinical_director"] });
+  });
+
+  it("si el director clínico no puede, basta el CEO", () => {
+    expect(summarizeReviews([{ ...chris, decision: "approved" }]).complete).toBe(true);
+  });
+
+  it("los dos pueden aprobar (la segunda es opcional)", () => {
     const s = summarizeReviews([{ ...chris, decision: "approved" }, { ...rafa, decision: "approved" }]);
-    expect(s.missingRoles).toEqual(["sales"]);
-    expect(s.complete).toBe(false);
-  });
-
-  it("los tres aprueban: completa", () => {
-    const s = summarizeReviews([chris, rafa, euri].map((r) => ({ ...r, decision: "approved" as const })));
+    expect(s.approvedRoles).toEqual(["clinical_director", "ceo"]);
     expect(s.complete).toBe(true);
   });
 
-  it("una petición de cambios bloquea aunque los demás aprueben", () => {
-    const s = summarizeReviews([{ ...chris, decision: "approved" }, { ...rafa, decision: "changes_requested" }, { ...euri, decision: "approved" }]);
+  it("ventas ya no cuenta como revisor", () => {
+    expect(summarizeReviews([{ ...euri, decision: "approved" }]).complete).toBe(false);
+  });
+
+  it("una petición de cambios bloquea aunque el otro apruebe", () => {
+    const s = summarizeReviews([{ ...chris, decision: "approved" }, { ...rafa, decision: "changes_requested" }]);
     expect(s.changesRequested).toBe(true);
     expect(s.complete).toBe(false);
-  });
-
-  it("quien tiene varios roles cubre todos con una sola aprobación", () => {
-    const s = summarizeReviews([{ reviewerId: "x", reviewerRoles: ["ceo", "sales"], decision: "approved" }, { ...rafa, decision: "approved" }]);
-    expect(s.complete).toBe(true);
   });
 
   it("aprobar sin rol revisor no cuenta", () => {

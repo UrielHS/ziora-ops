@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, arrayContains, asc, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { contentPieces, demoRequests, goals } from "@/db/schema";
 
@@ -17,7 +17,7 @@ export async function goalsWithValues() {
   const [[demos], [paid], [fb]] = await Promise.all([
     db.select({ n: count() }).from(demoRequests).where(inArray(demoRequests.stage, ["scheduled", "done", "trial", "paid", "no_show"])),
     db.select({ n: count() }).from(demoRequests).where(eq(demoRequests.stage, "paid")),
-    db.select({ n: count() }).from(contentPieces).where(and(eq(contentPieces.channel, "facebook_group"), eq(contentPieces.status, "published"))),
+    db.select({ n: count() }).from(contentPieces).where(and(arrayContains(contentPieces.channels, ["facebook_group"]), eq(contentPieces.status, "published"))),
   ]);
   const auto: Record<string, number> = { demos: demos.n, paid: paid.n, fb_posts: fb.n };
   return rows.map((g) => ({ ...g, value: g.auto ? (auto[g.auto] ?? g.current) : g.current }));

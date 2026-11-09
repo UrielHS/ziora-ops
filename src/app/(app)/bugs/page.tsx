@@ -8,6 +8,7 @@ import { listUsers } from "@/db/queries";
 import { bugs, bugSeverityEnum, tasks } from "@/db/schema";
 import { fmtDate, relative } from "@/lib/format";
 import { BUG_SEVERITY, BUG_SOURCE, BUG_STATUS } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 const OPEN = ["new", "triaged", "in_progress"] as const;
@@ -124,6 +125,9 @@ export default async function BugsPage({ searchParams }: { searchParams: Promise
                     <Field label="PR que lo corrige"><input name="prUrl" type="url" defaultValue={b.prUrl ?? ""} className={inputCls} placeholder="https://github.com/…/pull/221" /></Field>
                     <Submit>Guardar</Submit>
                   </ActionForm>
+                  <div className="border-t border-line pt-3">
+                    <DeleteButton kind="bug" id={b.id} what={`BUG-${b.number}`} warning="Los tickets ligados a este bug se quedan, sin el enlace." label="Eliminar bug" />
+                  </div>
                 </div>
               </Modal>
               <span className="hidden sm:block"><Avatar name={assignee?.name} size={24} /></span>

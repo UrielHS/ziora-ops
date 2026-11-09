@@ -242,7 +242,7 @@ async function main() {
 
   // ---------- calendario de contenido ----------
   type P = typeof ops.contentPieces.$inferInsert;
-  const piece = (x: Partial<P> & Pick<P, "title" | "pillar" | "channel" | "format">): P => ({ status: "idea", risk: "low", ...x });
+  const piece = (x: Partial<P> & Pick<P, "title" | "pillar" | "channel" | "format">): P => ({ status: "idea", risk: "low", channels: [x.channel], ...x });
   const published = { status: "published" as const, legalChecklistOk: true };
   await db.insert(ops.contentPieces).values([
     piece({ title: "1 de cada 3 psicólogos se siente agotado (APA 2024–2025, EE. UU.)", pillar: "estudios", channel: "instagram", format: "carrusel", publishOn: dateISO(-6), ...published, ownerId: U("Paulina"), sources: ["APA Practitioner Pulse 2024 y 2025 (EE. UU.)"] }),

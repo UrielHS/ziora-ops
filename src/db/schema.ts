@@ -89,7 +89,7 @@ export const sendStatusEnum = ops.enum("send_status", [
 export const contentPillarEnum = ops.enum("content_pillar", [
   "producto", "ia_psicoterapia", "estudios", "roi", "psicoterapia_moderna", "memes",
 ]);
-export const contentChannelEnum = ops.enum("content_channel", ["instagram", "tiktok", "facebook_group", "linkedin", "blog", "email"]);
+export const contentChannelEnum = ops.enum("content_channel", ["instagram", "tiktok", "facebook_group", "linkedin", "blog", "email", "facebook"]);
 export const contentStatusEnum = ops.enum("content_status", [
   "idea", "draft", "legal_review", "approved", "scheduled", "published", "discarded",
 ]);
@@ -314,7 +314,9 @@ export const contentPieces = ops.table(
     id: id(),
     title: text("title").notNull(),
     pillar: contentPillarEnum("pillar").notNull(),
-    channel: contentChannelEnum("channel").notNull(),
+    channel: contentChannelEnum("channel").notNull(), // canal principal (el primero de channels)
+    // Una pieza se publica en varios canales a la vez (siempre TikTok, Instagram y Facebook; LinkedIn si es educativa).
+    channels: contentChannelEnum("channels").array().notNull().default(sql`'{}'::ops.content_channel[]`),
     format: text("format").notNull(), // reel, carrusel, imagen, aporte
     status: contentStatusEnum("status").notNull().default("idea"),
     risk: riskEnum("risk").notNull().default("low"),
@@ -327,10 +329,20 @@ export const contentPieces = ops.table(
     publishedUrl: text("published_url"),
     metrics: jsonb("metrics").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
     legalChecklistOk: boolean("legal_checklist_ok").notNull().default(false),
+    // Se pidió revisión (y no se ha cancelado). Una pieza puede estar programada y seguir pendiente de revisión.
+    reviewRequestedAt: timestamp("review_requested_at", { withTimezone: true }),
     ...timestamps(),
   },
   (t) => [index("content_pieces_publish_on_idx").on(t.publishOn)],
 );
+
+// ---------- ajustes editables desde la app (clave → valor) ----------
+export const settings = ops.table("settings", {
+  key: text("key").primaryKey(), // p. ej. "content_mix"
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
 
 // ---------- métricas: metas del plan GTM (sección 9 del brief) ----------
 export type GoalTargets = { d30: [number, number]; d60: [number, number]; d90: [number, number] };

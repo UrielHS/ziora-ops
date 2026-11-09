@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Settings, Target, Ticket, Users, Video,
+  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Menu, Settings, Target, Ticket, Users, Video, X,
 } from "lucide-react";
 import { Avatar, cn } from "@/components/ui";
 import { can, type Access, type Permission } from "@/lib/permissions";
@@ -17,11 +17,12 @@ type Item = {
   shared?: boolean; count?: number; perm?: Permission;
 };
 
-export function Sidebar({
-  user, counts, access,
-}: { user: { name: string; roleLabel: string }; counts: Record<string, number>; access: Access }) {
+type NavGroup = { label: string; items: Item[] };
+
+/** Secciones del menú filtradas por permisos. Las usan la barra lateral (escritorio) y el menú del celular. */
+function useNav(counts: Record<string, number>, access: Access) {
   const path = usePathname();
-  const all: { label: string; items: Item[] }[] = [
+  const all: NavGroup[] = [
     { label: "Operación", items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/tasks", label: "Tareas", icon: CheckSquare, count: counts.tasks },
@@ -64,6 +65,13 @@ export function Sidebar({
   const isActive = (href: string) =>
     (path === href || path.startsWith(`${href}/`)) && !hrefs.some((h) => h.length > href.length && (path === h || path.startsWith(`${h}/`)));
 
+  return { path, groups, isActive };
+}
+
+export function Sidebar({
+  user, counts, access,
+}: { user: { name: string; roleLabel: string }; counts: Record<string, number>; access: Access }) {
+  const { groups, isActive } = useNav(counts, access);
   // Grupos plegables: el de la página actual siempre abierto; los demás, como los dejó la persona.
   const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -152,20 +160,57 @@ export function Sidebar({
   );
 }
 
-export function MobileNav() {
-  const path = usePathname();
-  const items = [
-    { href: "/dashboard", icon: LayoutDashboard }, { href: "/tasks", icon: CheckSquare }, { href: "/demos", icon: Video },
-    { href: "/contacts", icon: Users }, { href: "/campaigns", icon: Mail }, { href: "/bugs", icon: Bug },
-  ];
+export function MobileNav({ counts, access }: { counts: Record<string, number>; access: Access }) {
+  const { path, groups, isActive } = useNav(counts, access);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [path]); // al navegar se cierra
+  const visible = new Set(groups.flatMap((g) => g.items.map((i) => i.href)));
+  const shortcuts = [
+    { href: "/dashboard", icon: LayoutDashboard, label: "Inicio" },
+    { href: "/tasks", icon: CheckSquare, label: "Tareas" },
+    { href: "/demos", icon: Video, label: "Demos" },
+    { href: "/content", icon: Megaphone, label: "Contenido" },
+  ].filter((s) => visible.has(s.href));
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-40 flex justify-around rounded-full border border-line bg-white/95 p-1.5 shadow-sm backdrop-blur md:hidden">
-      {items.map(({ href, icon: Icon }) => (
-        <Link key={href} href={href} className={cn("rounded-full p-2.5", path.startsWith(href) ? "bg-mint text-emerald" : "text-muted")}>
-          <Icon className="h-5 w-5" strokeWidth={1.6} />
-        </Link>
-      ))}
-    </nav>
+    <>
+      {open && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#F7F6F0] md:hidden" role="dialog" aria-modal="true" aria-label="Menú">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <span className="flex items-center gap-2"><Logo size={22} /><span className="text-[17px] font-extrabold text-teal">Ziora</span><span className="text-[17px] font-medium text-faint">Ops</span></span>
+            <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-muted hover:bg-white" aria-label="Cerrar menú"><X className="h-5 w-5" /></button>
+          </div>
+          <nav className="flex-1 overflow-y-auto px-3 pb-28 pt-3">
+            {groups.map((g, gi) => (
+              <div key={gi} className="mb-3">
+                {g.label && <p className="label px-3 pb-1">{g.label}</p>}
+                {g.items.map(({ href, label, icon: Icon, count }) => (
+                  <Link key={href} href={href} onClick={() => setOpen(false)}
+                    className={cn("flex items-center gap-3 rounded-2xl px-3 py-2.5 text-[15px]", isActive(href) ? "bg-mint font-semibold text-emerald" : "text-ink")}>
+                    <Icon className="h-5 w-5 shrink-0" strokeWidth={1.6} />
+                    <span className="flex-1">{label}</span>
+                    {!!count && <span className="rounded-full bg-[#ECEAE2] px-2 text-[11px] font-bold text-muted">{count}</span>}
+                  </Link>
+                ))}
+              </div>
+            ))}
+            <a href={GUIDE_URL} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-2xl px-3 py-2.5 text-[15px] text-muted">
+              <BookOpen className="h-5 w-5 shrink-0" strokeWidth={1.6} /><span className="flex-1">Guía de uso</span><span aria-hidden>↗</span>
+            </a>
+          </nav>
+        </div>
+      )}
+      <nav className="fixed inset-x-3 bottom-3 z-[60] flex justify-around rounded-full border border-line bg-white/95 p-1.5 shadow-sm backdrop-blur md:hidden">
+        {shortcuts.map(({ href, icon: Icon, label }) => (
+          <Link key={href} href={href} aria-label={label} className={cn("rounded-full p-2.5", isActive(href) || path.startsWith(`${href}/`) ? "bg-mint text-emerald" : "text-muted")}>
+            <Icon className="h-5 w-5" strokeWidth={1.6} />
+          </Link>
+        ))}
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Menú: todas las secciones"
+          className={cn("rounded-full p-2.5", open ? "bg-mint text-emerald" : "text-muted")}>
+          {open ? <X className="h-5 w-5" strokeWidth={1.6} /> : <Menu className="h-5 w-5" strokeWidth={1.6} />}
+        </button>
+      </nav>
+    </>
   );
 }
 

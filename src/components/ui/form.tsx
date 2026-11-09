@@ -50,11 +50,15 @@ export function Modal({
   );
 }
 
-export function Submit({ children, variant = "primary", className }: { children: React.ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; className?: string }) {
+export function Submit({ children, variant = "primary", className, name, value }: {
+  children: React.ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; className?: string;
+  /** Para formularios con varios botones: el servidor recibe name=value del botón presionado. */
+  name?: string; value?: string;
+}) {
   const status = useFormStatus();
   const pending = useContext(PendingCtx) || status.pending;
   return (
-    <button type="submit" disabled={pending} className={cn(btn(variant), className)}>
+    <button type="submit" name={name} value={value} disabled={pending} className={cn(btn(variant), className)}>
       {pending ? "Guardando…" : children}
     </button>
   );
@@ -86,7 +90,8 @@ export function ActionForm({
       ref={formRef}
       onSubmit={(e) => {
         e.preventDefault();
-        const fd = new FormData(e.currentTarget);
+        // Incluye el botón presionado (name/value) para formularios con varias acciones.
+        const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter);
         startTransition(() => formAction(fd));
       }}
       className={className ?? "flex flex-col gap-4"}

@@ -12,6 +12,7 @@ import { fmtDate, relative } from "@/lib/format";
 import { EFFORT, TICKET_KIND, TICKET_ORIGIN, TICKET_STATUS, VIABILITY } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import { requireAccess } from "@/lib/session";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -154,6 +155,7 @@ function TicketDetail({
       </div>
 
       {canTriage && (
+        <>
         <ActionForm action={evaluateTicket}>
           <input type="hidden" name="id" value={t.id} />
           <p className="label">Evaluación de Dev/QA</p>
@@ -178,6 +180,10 @@ function TicketDetail({
           <Submit>Guardar evaluación</Submit>
           <p className="text-[11px] text-faint">Al pasar a &quot;Planeado&quot; se crea la tarea en el tablero con la historia y los criterios.</p>
         </ActionForm>
+          <div className="border-t border-line pt-3">
+            <DeleteButton kind="ticket" id={t.id} what={`TKT-${t.number}`} warning="Si ya se convirtió en tarea, la tarea se queda." label="Eliminar ticket" />
+          </div>
+        </>
       )}
     </div>
   );

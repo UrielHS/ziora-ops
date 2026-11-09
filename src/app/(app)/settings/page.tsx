@@ -12,6 +12,7 @@ import { users } from "@/db/shared";
 import { OPS_ROLE } from "@/lib/labels";
 import { ALL_ROLES, can } from "@/lib/permissions";
 import { requireAccess } from "@/lib/session";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -127,7 +128,8 @@ export default async function SettingsPage() {
             {epics.map((e) => (
               <div key={e.id} className="flex items-center gap-3 border-b border-[#EFEDE6] px-5 py-2.5 last:border-b-0">
                 <span className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white" style={{ background: e.color }}>{e.key}</span>
-                <span className="text-sm">{e.name}</span>
+                <span className="flex-1 text-sm">{e.name}</span>
+                {canManageTeam && <DeleteButton kind="epic" id={e.id} what={`la épica ${e.key}`} warning="Sus tareas se quedan, sin épica." label="" />}
               </div>
             ))}
           </div>

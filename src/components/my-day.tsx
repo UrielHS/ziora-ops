@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, count, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { ArrowUpRight } from "lucide-react";
 import { Card, cn } from "@/components/ui";
 import { db } from "@/db";
@@ -44,9 +44,11 @@ export async function MyDay({ access }: { access: SessionAccess }) {
   }
 
   if (has(...CONTENT_REVIEWER_ROLES)) {
-    const inReview = await db.select({ id: contentPieces.id }).from(contentPieces).where(eq(contentPieces.status, "legal_review"));
-    const reviews = await reviewsForPieces(db, inReview.map((p) => p.id));
-    const pendingMine = inReview.filter((p) => reviews.get(p.id)?.reviews.find((r) => r.reviewerId === user.id)?.decision !== "approved").length;
+    const candidates = await db.select({ id: contentPieces.id, status: contentPieces.status }).from(contentPieces)
+      .where(or(eq(contentPieces.status, "legal_review"), and(eq(contentPieces.status, "scheduled"), isNotNull(contentPieces.reviewRequestedAt))));
+    const reviews = await reviewsForPieces(db, candidates.map((p) => p.id));
+    // Pendiente: aún no aprobada por nadie (o con cambios) y yo no la he aprobado.
+    const pendingMine = candidates.filter((p) => !reviews.get(p.id)?.complete && reviews.get(p.id)?.reviews.find((r) => r.reviewerId === user.id)?.decision !== "approved").length;
     items.push({ label: "Piezas esperando mi revisión", n: pendingMine, href: "/content/review", urgent: pendingMine > 0 });
   }
 

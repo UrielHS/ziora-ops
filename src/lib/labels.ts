@@ -73,7 +73,7 @@ export const CONTENT_PILLAR = {
 } as const satisfies Record<string, { label: string; tone: Tone }>;
 
 export const CONTENT_CHANNEL = {
-  instagram: "Instagram", tiktok: "TikTok", facebook_group: "Grupos FB", linkedin: "LinkedIn", blog: "Blog", email: "Email",
+  instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", facebook_group: "Grupos FB", linkedin: "LinkedIn", blog: "Blog", email: "Email",
 } as const;
 
 export const CONTENT_STATUS = {

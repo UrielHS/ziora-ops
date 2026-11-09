@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export const dynamic = "force-dynamic";
 const PAGE = 40;
@@ -210,6 +211,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
                   <Field label="Notas"><textarea name="notes" rows={2} defaultValue={c.notes ?? ""} className={inputCls} /></Field>
                   <Submit>Guardar cambios</Submit>
                 </ActionForm>
+                <DeleteButton kind="contact" id={c.id} what={`a ${c.name}`} warning="También se borra su permiso de correo y se quita de las cuentas donde aparece. Sus demos se quedan, sin el contacto." label="Eliminar contacto" />
                 <div className="rounded-2xl border border-line bg-white p-4">
                   <p className="text-sm font-bold">Permiso de correo (LFPDPPP)</p>
                   <p className="mt-0.5 text-xs text-muted">

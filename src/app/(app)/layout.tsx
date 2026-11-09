@@ -39,7 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         )}
         {children}
       </div>
-      <MobileNav />
+      <MobileNav counts={counts} access={{ isAdmin, roles }} />
     </div>
   );
 }

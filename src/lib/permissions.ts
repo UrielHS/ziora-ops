@@ -12,7 +12,7 @@ export const ALL_ROLES: OpsRole[] = ["ceo", "sales", "clinical_director", "marke
 export const PERMISSIONS = {
   "team.manage": ["ceo", "operations"],
   "content.manage": ["marketing", "ceo", "operations"],
-  "content.review": ["ceo", "clinical_director", "sales"],
+  "content.review": ["clinical_director", "ceo"],
   "content.suggest": ALL_ROLES,
   "suggestions.decide": ["marketing", "ceo"],
   "sales.manage": ["sales", "ceo"],
@@ -28,8 +28,11 @@ export const PERMISSIONS = {
 
 export type Permission = keyof typeof PERMISSIONS;
 
-/** Cada pieza de contenido necesita una aprobación de cada uno de estos roles antes de publicarse. */
-export const CONTENT_REVIEWER_ROLES: OpsRole[] = ["ceo", "clinical_director", "sales"];
+/**
+ * Revisores de contenido. Basta UNA aprobación: la del director clínico o, si él no puede, la del CEO.
+ * La segunda es opcional.
+ */
+export const CONTENT_REVIEWER_ROLES: OpsRole[] = ["clinical_director", "ceo"];
 
 export type Access = { isAdmin: boolean; roles: OpsRole[] };
 

@@ -1,11 +1,12 @@
 import { CalendarDays, Flag, OctagonAlert } from "lucide-react";
-import { createTask, deleteTask, updateTask } from "@/actions/tasks";
+import { createTask, updateTask } from "@/actions/tasks";
 import { Avatar, Badge, btn, Field, inputCls, Select, cn } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { epics, sprints, tasks } from "@/db/schema";
 import type { UserOption } from "@/db/queries";
 import { fmtDate, todayISO } from "@/lib/format";
 import { PRIORITY, TASK_STATUS } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type Task = typeof tasks.$inferSelect;
 type Epic = typeof epics.$inferSelect;
@@ -108,10 +109,9 @@ export function TaskCard({ t, opts, compact }: { t: Task; opts: TaskOpts; compac
           <Submit>Guardar</Submit>
         </div>
       </ActionForm>
-      <form action={deleteTask} className="mt-3 border-t border-line pt-0">
-        <input type="hidden" name="id" value={t.id} />
-        <button className={cn(btn("danger", "sm"), "mt-3")}>Eliminar tarea</button>
-      </form>
+      <div className="mt-3 border-t border-line pt-3">
+        <DeleteButton kind="task" id={t.id} what={`la tarea "${t.title}"`} label="Eliminar tarea" />
+      </div>
     </Modal>
   );
 }

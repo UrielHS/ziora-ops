@@ -3,6 +3,7 @@ import { Field, inputCls, Select } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { accounts, contracts, deals } from "@/db/schema";
 import { ACCOUNT_TYPE, BILLING_PERIOD, CONTRACT_STATUS, DEAL_STAGE } from "@/lib/labels";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type Account = typeof accounts.$inferSelect;
 type Deal = typeof deals.$inferSelect;
@@ -25,6 +26,12 @@ export function AccountFormButton({ a, users, trigger = "+ Cuenta", triggerClass
         <Field label="Notas"><textarea name="notes" rows={3} defaultValue={a?.notes ?? ""} className={inputCls} /></Field>
         <Submit>{a ? "Guardar" : "Crear cuenta"}</Submit>
       </ActionForm>
+      {a && (
+        <div className="mt-3 border-t border-line pt-3">
+          <DeleteButton kind="account" id={a.id} what={`la cuenta ${a.name}`} redirectTo="/sales" label="Eliminar cuenta"
+            warning="También se borran sus oportunidades, contratos y seguimientos. Las personas se quedan en Contactos." />
+        </div>
+      )}
     </Modal>
   );
 }
@@ -74,6 +81,11 @@ export function DealFormButton({
         <Submit>{d ? "Guardar" : "Crear"}</Submit>
         <p className="text-[11px] text-faint">Al marcarla como ganada se crea el borrador del contrato.</p>
       </ActionForm>
+      {d && (
+        <div className="mt-3 border-t border-line pt-3">
+          <DeleteButton kind="deal" id={d.id} what={`la oportunidad "${d.name}"`} warning="Si tiene contrato, el contrato se queda sin el enlace." label="Eliminar oportunidad" />
+        </div>
+      )}
     </Modal>
   );
 }
@@ -99,6 +111,11 @@ export function ContractFormButton({ c, accountId, trigger = "+ Contrato", trigg
         <Field label="Notas"><textarea name="notes" rows={2} defaultValue={c?.notes ?? ""} className={inputCls} /></Field>
         <Submit>{c ? "Guardar" : "Crear contrato"}</Submit>
       </ActionForm>
+      {c && (
+        <div className="mt-3 border-t border-line pt-3">
+          <DeleteButton kind="contract" id={c.id} what={`el contrato CTR-${c.number}`} label="Eliminar contrato" />
+        </div>
+      )}
     </Modal>
   );
 }
