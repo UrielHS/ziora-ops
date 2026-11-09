@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { cn } from "./index";
 
 export type KanbanColumn = { id: string; label: string; accent?: string };
@@ -12,15 +12,19 @@ export function Kanban({
 }: {
   columns: KanbanColumn[];
   items: KanbanItem[];
-  onMove: (id: string, column: string) => Promise<void>;
+  /** Devuelve { error } para avisar sin guardar; el tablero vuelve a su estado. */
+  onMove: (id: string, column: string) => Promise<void | { error?: string }>;
   minColWidth?: number;
 }) {
   const [, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const [optimistic, move] = useOptimistic(items, (state, m: { id: string; column: string }) =>
     state.map((i) => (i.id === m.id ? { ...i, column: m.column } : i)),
   );
 
   return (
+    <div className="flex flex-col gap-2">
+    {error && <p className="rounded-xl bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
     <div className="flex gap-3 overflow-x-auto pb-2">
       {columns.map((col) => {
         const colItems = optimistic.filter((i) => i.column === col.id);
@@ -40,7 +44,9 @@ export function Kanban({
               if (!id) return;
               start(async () => {
                 move({ id, column: col.id });
-                await onMove(id, col.id);
+                setError(null);
+                const r = await onMove(id, col.id);
+                if (r && r.error) setError(r.error);
               });
             }}
           >
@@ -69,6 +75,7 @@ export function Kanban({
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

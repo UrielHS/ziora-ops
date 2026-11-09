@@ -30,12 +30,17 @@ function refresh(leadId?: string) {
 }
 
 /** Arrastre en el kanban. Perdido se marca con su botón para capturar el motivo. */
-export async function moveLead(leadId: string, to: string) {
-  const a = await actor();
-  const s = status.parse(to);
-  if (s === "perdido") throw new Error("Usa el botón Perdido para indicar el motivo");
-  await setLeadStatus(db, id.parse(leadId), s, a);
-  refresh(leadId);
+export async function moveLead(leadId: string, to: string): Promise<void | { error?: string }> {
+  try {
+    const a = await actor();
+    const s = status.parse(to);
+    if (s === "perdido") return { error: "Usa el botón Perdido en la ficha para indicar el motivo" };
+    await setLeadStatus(db, id.parse(leadId), s, a);
+    refresh(leadId);
+  } catch (err) {
+    // No se lanza: en producción Next oculta el mensaje de un error lanzado en una server action.
+    return { error: err instanceof Error ? err.message : "No se pudo mover el lead" };
+  }
 }
 
 const _setLeadStatus = formAction(z.object({ id, status, lostReason: z.string().trim().max(200).optional() }), async (d) => {
@@ -86,6 +91,19 @@ const _setPriority = formAction(z.object({ ids, priority: z.coerce.number().int(
   return "Prioridad actualizada";
 });
 
+/** Barra del kanban: el botón presionado (op) decide si se asigna dueño o se cambia prioridad a los seleccionados. */
+const _bulk = formAction(z.object({ ids, op: z.enum(["owner", "priority"]), ownerId: z.uuid().optional(), priority: z.coerce.number().int().min(1).max(3).optional() }), async (d) => {
+  const a = await actor();
+  if (d.op === "owner") {
+    await assignOwner(db, d.ids, d.ownerId ?? null, a);
+    refresh();
+    return d.ownerId ? `${d.ids.length} lead(s) asignado(s)` : `${d.ids.length} lead(s) sin dueño`;
+  }
+  await setPriority(db, d.ids, (d.priority as 1 | 2 | 3 | undefined) ?? null, a);
+  refresh();
+  return `Prioridad actualizada en ${d.ids.length} lead(s)`;
+});
+
 const _addNote = formAction(z.object({ id, text: z.string().trim().min(1, "escribe la nota").max(2000) }), async (d) => {
   await logActivity(db, { contactId: d.id, type: "nota", actor: await actor(), summary: d.text });
   refresh(d.id);
@@ -106,4 +124,5 @@ export async function postponeAction(prev: ActionState, fd: FormData) { return _
 export async function assignOwnerAction(prev: ActionState, fd: FormData) { return _assignOwner(prev, fd); }
 export async function setPriorityAction(prev: ActionState, fd: FormData) { return _setPriority(prev, fd); }
 export async function addNoteAction(prev: ActionState, fd: FormData) { return _addNote(prev, fd); }
+export async function bulkLeadsAction(prev: ActionState, fd: FormData) { return _bulk(prev, fd); }
 export async function convertToAccountAction(prev: ActionState, fd: FormData) { return _convertToAccount(prev, fd); }

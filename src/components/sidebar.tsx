@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Menu, Settings, Target, Ticket, Users, Video, X,
+  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, Funnel, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Menu, Settings, Target, Ticket, Users, Video, X,
 } from "lucide-react";
 import { Avatar, cn } from "@/components/ui";
 import { can, type Access, type Permission } from "@/lib/permissions";
@@ -29,6 +29,7 @@ function useNav(counts: Record<string, number>, access: Access) {
     ] },
     { label: "Ventas", items: [
       { href: "/sales", label: "Cuentas y contratos", icon: Building2, perm: "sales.view" },
+      { href: "/leads", label: "Leads", icon: Funnel, count: counts.leads, perm: "leads.view" },
       { href: "/demos", label: "Demos", icon: Video, count: counts.demos, perm: "leads.view" },
       { href: "/contacts", label: "Contactos", icon: Users, perm: "leads.view" },
     ] },
