@@ -50,6 +50,12 @@ export default async function SettingsPage() {
     },
     { name: "Redes y anuncios (Meta)", ok: !!process.env.SOCIAL_TOKEN_KEY, detail: process.env.SOCIAL_TOKEN_KEY ? "Tokens por cuenta en Redes sociales · cada mañana" : "Falta SOCIAL_TOKEN_KEY (docs/REDES-Y-ANUNCIOS.md)", hook: `${app}/api/jobs/sync-social` },
     { name: "Ayuda y sugerencias de la app", ok: !!process.env.ZIORA_APP_BRIDGE_SECRET, detail: "Trigger opsHelpRequest → tickets; firma X-Ops-Signature", hook: `${app}/api/webhooks/ziora-help` },
+    {
+      name: "Cadencia de leads",
+      ok: !!(process.env.JOB_SECRET && process.env.RESEND_API_KEY),
+      detail: process.env.JOB_SECRET ? "Cloud Scheduler cada hora de 8 a 20 (CDMX) · correos por Resend, WhatsApp queda en Hoy" : "Falta JOB_SECRET (docs/RUNBOOK-CRM-LEADS.md §7)",
+      hook: `${app}/api/jobs/run-sequences`,
+    },
   ];
 
   return (
