@@ -193,6 +193,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
                   {c.email && <a href={`mailto:${c.email}`} className={btn("ghost", "sm")}><Mail className="h-3.5 w-3.5" />{c.email}</a>}
                   {c.phone && <span className={btn("ghost", "sm")}><Phone className="h-3.5 w-3.5" />{c.phone}</span>}
                   {c.eventOpsContactId && <a href={`${eventOps}/contacts/${c.eventOpsContactId}`} target="_blank" className={btn("secondary", "sm")}><Link2 className="h-3.5 w-3.5" />Ver origen en Event Ops</a>}
+                  {c.leadStatus && <Link href={`/leads/${c.id}`} className={btn("primary", "sm")}>Ver ficha de lead</Link>}
                 </div>
                 {(c.jobTitle || c.patientsPerWeek || c.approach || c.documentation || c.aiUsage) && (
                   <div className="rounded-2xl border border-line bg-white p-4">

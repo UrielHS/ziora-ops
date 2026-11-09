@@ -2,11 +2,12 @@
  * Reglas del CRM de leads: el embudo, sus avances y el timeline de cada contacto.
  * Todo cambio de estado deja una actividad `cambio_estado`; nada se edita, solo se agrega.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
-import { appUsers, contactActivities, contacts, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
+import { appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
-import { LEAD_STATUS } from "@/lib/labels";
+import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
+import { fmtDateTime } from "@/lib/format";
 import { isPaying } from "./app-users";
 
 /** Orden del embudo. `perdido` no está: es terminal y solo se pone a mano (o por baja). */
@@ -75,17 +76,18 @@ export async function setLeadStatus(db: Dbx, contactId: string, to: LeadStatus, 
 /** Toque saliente (WhatsApp, correo, llamada, reunión): actualiza el último contacto y pasa a contactado si estaba en nuevo. */
 export async function recordTouch(db: Dbx, contactId: string, channel: TouchChannel, actor: Actor, summary: string): Promise<void> {
   await db.transaction(async (tx) => {
-    await logActivity(tx, { contactId, type: channel, direction: "saliente", actor, summary });
     await tx.update(contacts).set({ lastContactAt: new Date() }).where(eq(contacts.id, contactId));
     await advanceLead(tx, contactId, "contactado", actor, { via: channel });
+    // El toque se registra al final: es lo último que pasó y así queda arriba en el timeline.
+    await logActivity(tx, { contactId, type: channel, direction: "saliente", actor, summary });
   });
 }
 
 /** El lead respondió: actividad entrante y avance a respondio. */
 export async function markReplied(db: Dbx, contactId: string, actor: Actor, summary = "Respondió"): Promise<void> {
   await db.transaction(async (tx) => {
-    await logActivity(tx, { contactId, type: "nota", direction: "entrante", actor, summary });
     await advanceLead(tx, contactId, "respondio", actor);
+    await logActivity(tx, { contactId, type: "nota", direction: "entrante", actor, summary });
   });
 }
 
@@ -138,4 +140,53 @@ export async function syncLeadStatusFromAppUsers(db: Dbx): Promise<{ trial: numb
     }
   }
   return { trial, paid };
+}
+
+export type TimelineItem = {
+  at: Date;
+  kind: ActivityType | "campaign_send";
+  title: string;
+  detail?: string;
+  actor?: string;
+  direction?: Direction;
+};
+
+/** Todo lo que le ha pasado al contacto: actividades, correos de campaña y demos, de lo más reciente a lo más viejo. */
+export async function loadTimeline(db: Dbx, contactId: string): Promise<TimelineItem[]> {
+  const [acts, sends, demos] = await Promise.all([
+    db.select().from(contactActivities).where(eq(contactActivities.contactId, contactId)).orderBy(desc(contactActivities.occurredAt)).limit(200),
+    db.select({ at: campaignSends.createdAt, status: campaignSends.status, campaign: campaigns.name })
+      .from(campaignSends).innerJoin(campaigns, eq(campaigns.id, campaignSends.campaignId)).where(eq(campaignSends.contactId, contactId)),
+    db.select().from(demoRequests).where(eq(demoRequests.contactId, contactId)),
+  ]);
+  const items: TimelineItem[] = [
+    ...acts.map((a) => ({ at: a.occurredAt, kind: a.type, title: a.summary, actor: a.actorLabel, direction: a.direction as Direction })),
+    ...sends.map((s) => ({ at: s.at, kind: "campaign_send" as const, title: `Correo de campaña · ${SEND_STATUS[s.status] ?? s.status}`, detail: s.campaign })),
+    ...demos.map((d) => ({
+      at: d.createdAt, kind: "demo" as const,
+      title: `Demo · ${DEMO_STAGE[d.stage]?.label ?? d.stage}`,
+      detail: d.scheduledAt ? `Agendada para ${fmtDateTime(d.scheduledAt)}` : d.lostReason ?? undefined,
+    })),
+  ];
+  return items.sort((a, b) => b.at.getTime() - a.at.getTime());
+}
+
+/**
+ * Mensaje de WhatsApp prellenado según la etapa. Sin precios ni datos de la consulta: eso se habla en la llamada.
+ * La persona lo edita antes de mandarlo; aquí solo se le ahorra la hoja en blanco.
+ */
+export function defaultMessage(c: { name: string; leadStatus: LeadStatus | null }, userName: string): string {
+  const first = c.name.trim().split(/\s+/)[0] || "hola";
+  const me = userName.trim().split(/\s+/)[0] || userName;
+  switch (c.leadStatus) {
+    case "nuevo":
+    case "contactado":
+      return `Hola ${first}, soy ${me} de Ziora. Nos vimos en Mexico Tech Week, en el panel y el taller de IA para terapeutas. Ziora te ayuda a documentar tus sesiones con IA para que recuperes tiempo de tu consulta. ¿Te late que te lo enseñe en una llamada corta esta semana?`;
+    case "respondio":
+      return `Hola ${first}, qué gusto leerte. ¿Te acomoda una llamada de 15 minutos esta semana para enseñarte Ziora en vivo? Dime qué día y hora te quedan bien.`;
+    case "demo_agendada":
+      return `Hola ${first}, te confirmo nuestra demo de Ziora. Un rato antes te mando el enlace. ¿Sigue bien la hora que acordamos?`;
+    default:
+      return `Hola ${first}, soy ${me} de Ziora. ¿Cómo vas? Cualquier duda o idea, aquí estoy.`;
+  }
 }

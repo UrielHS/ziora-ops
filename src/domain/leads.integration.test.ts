@@ -110,4 +110,22 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(ca).toMatchObject({ leadStatus: "perdido", lostReason: "baja" });
     expect(cb.leadStatus).toBe("pago");
   });
+
+  it("el timeline une actividades y demos, de lo más reciente a lo más viejo, con el toque arriba", async () => {
+    const { db } = await import("@/db");
+    const { demoRequests } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { loadTimeline, recordTouch } = await import("./leads");
+    const t = Date.now();
+    const email = `tl${t}@example.com`;
+    const { id } = await upsertContact(db, { name: "Timeline Lead", email, source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    await db.insert(demoRequests).values({ contactId: id, fullName: "Timeline Lead", email, source: "test", stage: "scheduled", scheduledAt: new Date("2026-11-20T17:00:00Z") });
+    await recordTouch(db, id, "whatsapp", actor, "Hola por WhatsApp");
+
+    const items = await loadTimeline(db, id);
+    expect(items.length).toBeGreaterThanOrEqual(3); // toque, cambio de estado, demo
+    for (let i = 1; i < items.length; i++) expect(items[i - 1].at.getTime()).toBeGreaterThanOrEqual(items[i].at.getTime());
+    expect(items[0]).toMatchObject({ kind: "whatsapp", title: "Hola por WhatsApp", actor: "prueba" });
+    expect(items.some((i) => i.kind === "demo" && i.title.includes("Agendada"))).toBe(true);
+  });
 });

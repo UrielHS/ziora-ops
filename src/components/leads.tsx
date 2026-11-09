@@ -1,13 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarClock, MapPin } from "lucide-react";
-import { moveLead } from "@/actions/leads";
-import { Avatar, Badge, cn } from "@/components/ui";
+import { useState } from "react";
+import { ArrowRightLeft, CalendarClock, Cog, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
+import { addNoteAction, markRepliedAction, moveLead, recordTouchAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
+import { Avatar, Badge, btn, cn, inputCls } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
-import type { contacts } from "@/db/schema";
-import { fmtDate, todayISO } from "@/lib/format";
-import { CITY, LEAD_PRIORITY } from "@/lib/labels";
+import type { contacts, LeadStatus } from "@/db/schema";
+import type { TimelineItem } from "@/domain/leads";
+import { ActionForm, Submit } from "@/components/ui/form";
+import { fmtDate, fmtDateTime, relative, todayISO } from "@/lib/format";
+import { CITY, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
 
 type Lead = typeof contacts.$inferSelect;
 
@@ -60,4 +63,113 @@ export function LeadsBoard({ columns, items, canManage }: { columns: KanbanColum
       onMove={canManage ? moveLead : async () => ({ error: "Tu rol no tiene permiso para mover leads" })}
     />
   );
+}
+
+export function LeadStatusBadge({ status }: { status: LeadStatus | null }) {
+  if (!status) return <Badge tone="gray">Sin estado</Badge>;
+  const s = LEAD_STATUS[status];
+  return <Badge tone={s.tone}>{s.label}</Badge>;
+}
+
+const TOUCHES = [
+  { channel: "whatsapp", label: "Mandé WhatsApp", icon: MessageCircle },
+  { channel: "correo", label: "Mandé correo", icon: Mail },
+  { channel: "llamada", label: "Llamé", icon: Phone },
+] as const;
+
+/** Un formulario por botón: cada toque es un envío con su canal; "Respondió" es la entrada del lead. */
+export function TouchButtons({ id }: { id: string }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {TOUCHES.map((t) => (
+        <ActionForm key={t.channel} action={recordTouchAction} className="contents">
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="channel" value={t.channel} />
+          <Submit variant="secondary" className="!py-1.5 !text-xs"><t.icon className="h-3.5 w-3.5" /> {t.label}</Submit>
+        </ActionForm>
+      ))}
+      <ActionForm action={markRepliedAction} className="contents">
+        <input type="hidden" name="id" value={id} />
+        <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
+      </ActionForm>
+    </div>
+  );
+}
+
+export function NextActionForm({ id, text, on }: { id: string; text: string | null; on: string | null }) {
+  return (
+    <ActionForm action={setNextActionAction} className="flex flex-col gap-2">
+      <input type="hidden" name="id" value={id} />
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <input name="text" defaultValue={text ?? ""} placeholder="Qué sigue: proponer demo, mandar recordatorio…" className={inputCls} />
+        <input type="date" name="on" defaultValue={on ?? ""} className={cn(inputCls, "sm:w-40")} />
+      </div>
+      <div className="flex gap-2">
+        <Submit variant="secondary" className="!py-1.5 !text-xs">Guardar siguiente paso</Submit>
+      </div>
+    </ActionForm>
+  );
+}
+
+/** Cambio manual de estado. Perdido pide el motivo; es lo único que no se hace arrastrando en el kanban. */
+export function LeadStatusForm({ id, status }: { id: string; status: LeadStatus | null }) {
+  const [next, setNext] = useState<string>(status ?? "nuevo");
+  return (
+    <ActionForm action={setLeadStatusAction} className="flex flex-col gap-2">
+      <input type="hidden" name="id" value={id} />
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <select name="status" value={next} onChange={(e) => setNext(e.target.value)} className={cn(inputCls, "pr-8")}>
+          {Object.entries(LEAD_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <Submit variant={next === "perdido" ? "danger" : "secondary"} className="!py-1.5 !text-xs">{next === "perdido" ? "Marcar perdido" : "Cambiar estado"}</Submit>
+      </div>
+      {next === "perdido" && <input name="lostReason" required placeholder="Motivo: no le interesa, ya usa otra herramienta, sin presupuesto…" className={inputCls} />}
+    </ActionForm>
+  );
+}
+
+export function NoteForm({ id }: { id: string }) {
+  return (
+    <ActionForm action={addNoteAction} resetOnSuccess className="flex flex-col gap-2">
+      <input type="hidden" name="id" value={id} />
+      <textarea name="text" rows={2} required placeholder="Nota rápida: qué dijo, qué le preocupa, qué prometimos…" className={inputCls} />
+      <div><Submit variant="secondary" className="!py-1.5 !text-xs"><StickyNote className="h-3.5 w-3.5" /> Guardar nota</Submit></div>
+    </ActionForm>
+  );
+}
+
+const KIND_ICON: Record<TimelineItem["kind"], React.ComponentType<{ className?: string }>> = {
+  nota: StickyNote, whatsapp: MessageCircle, correo: Mail, llamada: Phone, reunion: Users, cambio_estado: ArrowRightLeft,
+  demo: Video, campana: Megaphone, secuencia: Megaphone, sistema: Cog, campaign_send: Megaphone,
+};
+
+export function Timeline({ items }: { items: TimelineItem[] }) {
+  if (!items.length) return <p className="text-sm text-muted">Todavía no hay nada registrado.</p>;
+  return (
+    <ol className="flex flex-col">
+      {items.map((it, i) => {
+        const Icon = KIND_ICON[it.kind] ?? Cog;
+        const inbound = it.direction === "entrante";
+        return (
+          <li key={i} className="flex gap-3 border-b border-[#EFEDE6] py-2.5 last:border-b-0">
+            <span className={cn("mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full", inbound ? "bg-mint text-emerald" : "bg-[#F1F0EA] text-muted")}>
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm">{it.title}</p>
+              {it.detail && <p className="text-xs text-muted">{it.detail}</p>}
+              <p className="text-[11px] text-faint" title={fmtDateTime(it.at)}>
+                {relative(it.at)}{it.actor ? ` · ${it.actor}` : ""}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function WhatsAppButton({ href, children = "Abrir WhatsApp" }: { href: string | null; children?: React.ReactNode }) {
+  if (!href) return <span className={cn(btn("secondary", "sm"), "cursor-not-allowed opacity-50")} title="Sin teléfono válido"><MessageCircle className="h-3.5 w-3.5" /> {children}</span>;
+  return <a href={href} target="_blank" rel="noreferrer" className={btn("secondary", "sm")}><MessageCircle className="h-3.5 w-3.5" /> {children}</a>;
 }
