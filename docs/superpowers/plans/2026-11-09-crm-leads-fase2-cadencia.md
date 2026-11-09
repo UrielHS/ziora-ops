@@ -21,6 +21,7 @@
 - Al terminar sin respuesta: lead queda `contactado` (si ya lo estaba) con `next_action = "Nutrir por newsletter"` y `next_action_on = null`.
 - Pruebas: unitarias con `npx vitest run <archivo>`; con base: `export $(grep -E "^DATABASE_URL" .env | tr -d '\r'); RUN_DB_TESTS=1 DB_POOL_MAX=1 npx vitest run --no-file-parallelism <archivo>` (PGlite en :5433 levantado con `npm run db:local`; migrar con `npm run db:migrate`). Antes de `npm run build`, matar el dev server (comparten `.next`).
 - La semilla de producción (secuencia "MTW 4 toques") **no se siembra sin la aprobación de Chris a los 4 textos** (spec §7). Local sí.
+- **El sistema ya está en uso con datos reales (Chris, 9-nov-2026: "considera que ya se está utilizando el sistema y que debe ser cuidadoso con los datos que actualmente se están moviendo").** Por eso: la migración 0014 es **solo aditiva** (tablas y enums nuevos; ni una columna ni un UPDATE sobre `contacts`, `contact_activities` o `contact_consents`); **nada se enrola solo** (ni al desplegar, ni al importar sin elegir secuencia, ni por backfill); el job solo actúa sobre `sequence_enrollments` y no manda nada mientras no haya enrollments; la única escritura nueva sobre `contacts` es `next_action`/`next_action_on`/`last_contact_at`/`lead_status` del lead enrolado, por los mismos caminos que ya existen (`recordTouch`, `advanceLead`). Cualquier prueba con base corre contra PGlite local, nunca contra producción.
 
 ## Review Focus
 
