@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
-import { accountContacts, accounts, appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
+import { accountContacts, accounts, appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, sequenceEnrollments, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
 import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
 import { fmtDateTime } from "@/lib/format";
@@ -51,12 +51,36 @@ async function changeStatus(db: Dbx, contactId: string, from: LeadStatus | null,
   });
 }
 
+const STOP_LABEL: Record<string, string> = {
+  respondio: "respondió", demo_agendada: "demo agendada", en_trial: "entró a trial", pago: "pagó", perdido: "lead perdido",
+  baja: "baja de correo", manual: "detenida a mano", rollback: "rollback",
+};
+
+/**
+ * Cadencia (spec §4.4): detiene las secuencias activas del contacto. Se llama cuando el lead sale de nuevo/contactado
+ * (respondió, demo, trial, pago, perdido, baja) o a mano. Devuelve cuántas detuvo.
+ */
+export async function stopActiveEnrollments(db: Dbx, contactId: string, reason: string): Promise<number> {
+  const rows = await db.update(sequenceEnrollments)
+    .set({ status: "detenida", stopReason: reason, nextRunAt: null, pendingStepId: null, pendingText: null, pendingSince: null })
+    .where(and(eq(sequenceEnrollments.contactId, contactId), eq(sequenceEnrollments.status, "activa")))
+    .returning({ id: sequenceEnrollments.id });
+  for (const r of rows) {
+    await logActivity(db, { contactId, type: "secuencia", actor: SYSTEM_ACTOR, summary: `Secuencia detenida: ${STOP_LABEL[reason] ?? reason}`, meta: { enrollmentId: r.id, reason } });
+  }
+  return rows.length;
+}
+
+/** A partir de respondió el lead ya no está en cadencia. */
+const stopsCadence = (to: LeadStatus) => to === "perdido" || LEAD_ORDER.indexOf(to) >= LEAD_ORDER.indexOf("respondio");
+
 /** Avance automático (sync, webhook, toque): solo si es hacia adelante. Devuelve si cambió. */
 export async function advanceLead(db: Dbx, contactId: string, to: LeadStatus, actor: Actor, meta: Record<string, unknown> = {}): Promise<boolean> {
   return db.transaction(async (tx) => {
     const [c] = await tx.select({ leadStatus: contacts.leadStatus }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
     if (!c || !isForward(c.leadStatus, to)) return false;
     await changeStatus(tx, contactId, c.leadStatus, to, actor, meta);
+    if (stopsCadence(to)) await stopActiveEnrollments(tx, contactId, to);
     return true;
   });
 }
@@ -70,16 +94,17 @@ export async function setLeadStatus(db: Dbx, contactId: string, to: LeadStatus, 
     if (!c) throw new Error("El contacto no existe.");
     if (c.leadStatus === to && to !== "perdido") return;
     await changeStatus(tx, contactId, c.leadStatus, to, actor, {}, lostReason);
+    if (stopsCadence(to)) await stopActiveEnrollments(tx, contactId, lostReason === "baja" ? "baja" : to);
   });
 }
 
 /** Toque saliente (WhatsApp, correo, llamada, reunión): actualiza el último contacto y pasa a contactado si estaba en nuevo. */
-export async function recordTouch(db: Dbx, contactId: string, channel: TouchChannel, actor: Actor, summary: string): Promise<void> {
+export async function recordTouch(db: Dbx, contactId: string, channel: TouchChannel, actor: Actor, summary: string, meta: Record<string, unknown> = {}): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.update(contacts).set({ lastContactAt: new Date() }).where(eq(contacts.id, contactId));
     await advanceLead(tx, contactId, "contactado", actor, { via: channel });
     // El toque se registra al final: es lo último que pasó y así queda arriba en el timeline.
-    await logActivity(tx, { contactId, type: channel, direction: "saliente", actor, summary });
+    await logActivity(tx, { contactId, type: channel, direction: "saliente", actor, summary, meta });
   });
 }
 
