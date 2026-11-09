@@ -77,7 +77,7 @@ export DATABASE_URL="postgres://ziora_ops:<contraseña>@localhost:5439/eventops"
 3. **Importar la hoja de Mexico Tech Week** desde **Contactos → Importar leads (CSV)**:
    - Base de consentimiento: **Registro en Luma (Mexico Tech Week)**. Sin esto los contactos no entran a campañas ni cadencias.
    - Dueño de los leads nuevos: **Uriel** (después se reparte por segmento).
-   - Columnas que lee: Nombre, Email, Teléfono, Puesto/Rol, Enfoque, Prioridad (1–5 → HOT/WARM/COLD), Segmento, Flag B2B,
+   - Columnas que lee: Nombre, Email, Teléfono, Puesto/Rol, Enfoque, Prioridad (P1 → Alta, P2 → Media, P3–P5 → Baja; el HOT/WARM/COLD va aparte, en Segmento), Segmento, Flag B2B,
      Asistió panel/taller, Ticket panel. El resumen dice cuántos se crearon, se actualizaron, se omitieron y por qué.
    - Quien solo tiene teléfono entra igual (se busca por `phone_e164`).
 4. **Repartir dueños** desde `/leads` → marcar "Ver todos", filtrar por prioridad o segmento, seleccionar y **Asignar dueño**,

@@ -63,7 +63,7 @@ export const contacts = ops.table(
     nextAction: text("next_action"),
     nextActionOn: date("next_action_on"),
     lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
-    priority: integer("priority"), // 1 HOT · 2 WARM · 3 COLD
+    priority: integer("priority"), // 1 alta (P1) · 2 media (P2) · 3 baja (P3-P5 de la hoja)
     segment: text("segment"), // segmento de la hoja de leads, tal cual (HOT, WARM-A, COLD-Virtual…)
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

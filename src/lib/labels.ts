@@ -211,9 +211,10 @@ export const LEAD_STATUS = {
 } as const satisfies Record<string, { label: string; tone: Tone }>;
 
 export const LEAD_PRIORITY = {
-  1: { label: "HOT", tone: "red" },
-  2: { label: "WARM", tone: "amber" },
-  3: { label: "COLD", tone: "gray" },
+  // Prioridad ≠ segmento: la hoja MTW trae P1..P5 (un director COLD es P2 por ser B2B). HOT/WARM/COLD viven en `segment`.
+  1: { label: "Alta", tone: "red" },
+  2: { label: "Media", tone: "amber" },
+  3: { label: "Baja", tone: "gray" },
 } as const satisfies Record<number, { label: string; tone: Tone }>;
 
 export const ACTIVITY_TYPE = {
