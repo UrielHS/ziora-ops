@@ -28,3 +28,5 @@ if (process.env.NODE_ENV !== "production") globalForDb.__zioraOpsSql = client;
 
 export const db = drizzle(client, { schema: { ...shared, ...ops } });
 export type Db = typeof db;
+/** Base o transacción: para funciones de dominio que se componen dentro de db.transaction(). */
+export type Dbx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
