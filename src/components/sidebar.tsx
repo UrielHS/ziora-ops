@@ -29,8 +29,8 @@ function useNav(counts: Record<string, number>, access: Access) {
     ] },
     { label: "Ventas", items: [
       { href: "/sales", label: "Cuentas y contratos", icon: Building2, perm: "sales.view" },
-      { href: "/demos", label: "Demos", icon: Video, count: counts.demos },
-      { href: "/contacts", label: "Contactos", icon: Users },
+      { href: "/demos", label: "Demos", icon: Video, count: counts.demos, perm: "leads.view" },
+      { href: "/contacts", label: "Contactos", icon: Users, perm: "leads.view" },
     ] },
     { label: "Clientes", items: [
       { href: "/customers", label: "Usuarios de Ziora", icon: HeartPulse, perm: "customers.view" },
@@ -42,8 +42,8 @@ function useNav(counts: Record<string, number>, access: Access) {
       { href: "/content/suggestions", label: "Sugerencias", icon: Lightbulb, count: counts.suggestions },
       { href: "/social", label: "Redes sociales", icon: BarChart3, perm: "analytics.view" },
       { href: "/ads", label: "Anuncios", icon: Target, perm: "analytics.view" },
-      { href: "/campaigns", label: "Correo masivo", icon: Mail },
-      { href: "/templates", label: "Plantillas", icon: FileCode2 },
+      { href: "/campaigns", label: "Correo masivo", icon: Mail, perm: "content.manage" },
+      { href: "/templates", label: "Plantillas", icon: FileCode2, perm: "content.manage" },
       { href: "/events", label: "Eventos", icon: CalendarDays, shared: true },
     ] },
     { label: "Producto", items: [

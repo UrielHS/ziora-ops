@@ -5,10 +5,12 @@ import { db } from "@/db";
 import { emailTemplates } from "@/db/schema";
 import { renderTemplate } from "@/domain/template";
 import { relative } from "@/lib/format";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function TemplatesPage() {
+  await requirePagePermission("content.manage");
   const rows = await db.select().from(emailTemplates).orderBy(desc(emailTemplates.updatedAt));
   return (
     <div className="flex flex-col gap-5">

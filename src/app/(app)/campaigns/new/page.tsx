@@ -8,6 +8,7 @@ import { emailTemplates } from "@/db/schema";
 import { events } from "@/db/shared";
 import { fmtDate, todayISO } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ function Chips({ name, options, selected = [] }: { name: string; options: [strin
 }
 
 export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ event?: string }> }) {
+  await requirePagePermission("content.manage");
   const sp = await searchParams;
   const [templates, evs] = await Promise.all([
     db.select({ id: emailTemplates.id, name: emailTemplates.name }).from(emailTemplates).orderBy(desc(emailTemplates.updatedAt)),

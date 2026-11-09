@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { can } from "./permissions";
+import { ALL_ROLES, can } from "./permissions";
 
 describe("can", () => {
   it("el admin de Event Ops puede todo", () => {
@@ -32,5 +32,15 @@ describe("can", () => {
     const a = { isAdmin: false, roles: ["marketing" as const] };
     expect(can(a, "content.suggest")).toBe(true);
     expect(can(a, "tickets.create")).toBe(true);
+  });
+
+  it("leads: todos ven; gestionan ventas, ceo, operaciones, director clínico y marketing", () => {
+    for (const r of ALL_ROLES) expect(can({ isAdmin: false, roles: [r] }, "leads.view")).toBe(true);
+    expect(can({ isAdmin: false, roles: ["marketing"] }, "leads.manage")).toBe(true);
+    expect(can({ isAdmin: false, roles: ["dev_qa"] }, "leads.manage")).toBe(false);
+    expect(can({ isAdmin: false, roles: ["dev_qa"] }, "contacts.import")).toBe(false);
+    expect(can({ isAdmin: false, roles: ["sales"] }, "campaigns.send")).toBe(false);
+    expect(can({ isAdmin: false, roles: ["marketing"] }, "campaigns.send")).toBe(true);
+    expect(can({ isAdmin: true, roles: [] }, "leads.manage")).toBe(true);
   });
 });

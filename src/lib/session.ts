@@ -29,7 +29,11 @@ export const requireUser = cache(async (): Promise<SessionUser> => {
 export const requireAccess = cache(async (): Promise<SessionAccess> => {
   const user = await requireUser();
   const rows = await db.select({ role: memberRoles.role }).from(memberRoles).where(eq(memberRoles.userId, user.id));
-  return { user, isAdmin: user.role === "admin", roles: rows.map((r) => r.role) };
+  const isAdmin = user.role === "admin";
+  const roles = rows.map((r) => r.role);
+  // Entrar a Event Ops no basta: aquí hay datos de leads. Sin rol en Ziora Ops (o admin) no se entra.
+  if (!isAdmin && roles.length === 0) redirect("/login?error=SinRol");
+  return { user, isAdmin, roles };
 });
 
 /** Para server actions: falla con un mensaje claro si la persona no tiene el permiso. */

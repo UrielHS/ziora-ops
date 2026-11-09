@@ -9,6 +9,7 @@ import { listUsers } from "@/db/queries";
 import { demoRequests, contacts } from "@/db/schema";
 import { pct } from "@/lib/format";
 import { DEMO_STAGE } from "@/lib/labels";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ const COLUMNS = ["requested", "scheduled", "done", "trial", "paid", "lost"] as c
 const ACCENT: Record<string, string> = { requested: "bg-faint", scheduled: "bg-[#1D5FA8]", done: "bg-[#6B4FA8]", trial: "bg-[#D99A2B]", paid: "bg-emerald", lost: "bg-danger" };
 
 export default async function DemosPage({ searchParams }: { searchParams: Promise<{ nuevo?: string }> }) {
+  await requirePagePermission("leads.view");
   const sp = await searchParams;
   const [users, rows] = await Promise.all([
     listUsers(),

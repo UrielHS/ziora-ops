@@ -7,10 +7,12 @@ import { PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { emailTemplates } from "@/db/schema";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function TemplatePage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePagePermission("content.manage");
   const { id } = await params;
   if (id === "new") {
     return (

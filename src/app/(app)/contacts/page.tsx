@@ -9,6 +9,7 @@ import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, c
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const PAGE = 40;
@@ -31,6 +32,7 @@ function TagPicker({ selected = [] }: { selected?: string[] }) {
 }
 
 export default async function ContactsPage({ searchParams }: { searchParams: Promise<SP> }) {
+  await requirePagePermission("leads.view");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page ?? 1));
   const where: SQL[] = [];

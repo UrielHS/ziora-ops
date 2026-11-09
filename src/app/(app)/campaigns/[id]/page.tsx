@@ -12,10 +12,12 @@ import { resolveRecipients } from "@/domain/campaigns";
 import { renderTemplate } from "@/domain/template";
 import { fmtDate, fmtDateTime, pct } from "@/lib/format";
 import { CAMPAIGN_STATUS, CITY, CONTACT_SOURCE, CONTACT_TAG, SEND_STATUS } from "@/lib/labels";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePagePermission("content.manage");
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const [row] = await db.select({ c: campaigns, t: emailTemplates }).from(campaigns).innerJoin(emailTemplates, eq(emailTemplates.id, campaigns.templateId)).where(eq(campaigns.id, id));

@@ -9,6 +9,7 @@ import { contacts } from "@/db/schema";
 import { alias } from "drizzle-orm/pg-core";
 import { eoContacts, eoContactTags, eoContactTagEnum, eventContacts, events, organizations } from "@/db/shared";
 import { CITY, CONTACT_TAG } from "@/lib/labels";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const LIMIT = 200;
@@ -22,6 +23,7 @@ type SP = { q?: string; tag?: string; evento?: string; ver?: string };
 const mine = alias(contacts, "zc");
 
 export default async function ImportEventOpsPage({ searchParams }: { searchParams: Promise<SP> }) {
+  await requirePagePermission("contacts.import");
   const sp = await searchParams;
   const where: SQL[] = [eq(eoContacts.type, "person")];
   if (sp.q) where.push(or(ilike(eoContacts.name, `%${sp.q}%`), ilike(eoContacts.email, `%${sp.q}%`), ilike(organizations.name, `%${sp.q}%`))!);

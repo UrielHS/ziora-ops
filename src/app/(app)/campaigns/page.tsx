@@ -7,10 +7,12 @@ import { events } from "@/db/shared";
 import { resolveRecipients } from "@/domain/campaigns";
 import { fmtDate, fmtDateTime, pct } from "@/lib/format";
 import { CAMPAIGN_STATUS, CITY, CONTACT_TAG } from "@/lib/labels";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function CampaignsPage() {
+  await requirePagePermission("content.manage");
   const rows = await db
     .select({
       c: campaigns, template: emailTemplates.name, tSubject: emailTemplates.subject, event: events.name,
