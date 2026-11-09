@@ -69,9 +69,15 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
     ...(input.marketingOptIn ? [{ channel: "email" as const, ...input.marketingOptIn }] : []),
   ];
   return db.transaction(async (tx) => {
-    const [existing] = email
+    let [existing] = email
       ? await tx.select().from(contacts).where(eq(contacts.email, email)).limit(1)
       : await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164!)).limit(1);
+    // Un lead que entró solo con teléfono y después trae correo es la misma persona: se completa en vez de duplicarlo.
+    // Si el dueño del teléfono ya tiene OTRO correo, son dos personas (p. ej. el conmutador de una clínica) y sigue abajo.
+    if (!existing && email && phoneE164) {
+      const [byPhone] = await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164)).limit(1);
+      if (byPhone && (!byPhone.email || byPhone.email === email)) existing = byPhone;
+    }
     // El teléfono normalizado es único: si ya lo tiene otro contacto, se deja una nota en vez de romper.
     let nextPhoneE164 = existing?.phoneE164 ?? phoneE164 ?? null;
     const extra: Record<string, unknown> = {};
@@ -83,6 +89,7 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
     if (existing) {
       id = existing.id;
       await tx.update(contacts).set({
+        email: fill(existing.email, email),
         phone: fill(existing.phone, input.phone), phoneE164: nextPhoneE164, company: fill(existing.company, input.company),
         jobTitle: fill(existing.jobTitle, input.jobTitle), city: fill(existing.city, input.city),
         cityName: fill(existing.cityName, input.cityName),
@@ -171,6 +178,23 @@ export async function optOut(db: Db, contactId: string, channel = "email") {
   } else {
     await setLeadStatus(db, contactId, "perdido", SYSTEM_ACTOR, { lostReason: "baja" });
   }
+}
+
+/**
+ * Rebote duro: ese correo no sirve, pero el lead sigue vivo (se le escribe por WhatsApp o se corrige el correo).
+ * Quita el permiso de correo y deja nota; no cambia el estado. La baja y la queja de spam sí van por optOut.
+ */
+export async function emailBounced(db: Db, email: string) {
+  const [c] = await db.select({ id: contacts.id }).from(contacts).where(eq(contacts.email, normalizeEmail(email))).limit(1);
+  if (!c) return;
+  await db
+    .insert(contactConsents)
+    .values({ contactId: c.id, channel: "email", optIn: false, source: "bounce", optedOutAt: new Date() })
+    .onConflictDoUpdate({
+      target: [contactConsents.contactId, contactConsents.channel],
+      set: { optIn: false, optedOutAt: new Date() },
+    });
+  await logActivity(db, { contactId: c.id, type: "sistema", actor: SYSTEM_ACTOR, summary: "Correo rebotó: se quitó el permiso de correo. Revisa la dirección o escríbele por WhatsApp." });
 }
 
 export async function optOutByEmail(db: Db, email: string) {

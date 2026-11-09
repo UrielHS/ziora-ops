@@ -2,7 +2,7 @@
  * Reglas del CRM de leads: el embudo, sus avances y el timeline de cada contacto.
  * Todo cambio de estado deja una actividad `cambio_estado`; nada se edita, solo se agrega.
  */
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
 import { accountContacts, accounts, appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
@@ -129,7 +129,8 @@ export async function syncLeadStatusFromAppUsers(db: Dbx): Promise<{ trial: numb
     .select({ contactId: contacts.id, uid: appUsers.uid, plan: appUsers.plan, status: appUsers.status, mrrCents: appUsers.mrrCents, currency: appUsers.currency })
     .from(appUsers)
     .innerJoin(contacts, eq(contacts.email, sql`lower(trim(${appUsers.email}))`))
-    .where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false)));
+    // Solo quien ya es lead: un contacto sin estado (equipo, ponentes, usuarios que llegaron solos) no se vuelve lead por usar la app.
+    .where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false), isNotNull(contacts.leadStatus)));
   let trial = 0, paid = 0;
   for (const r of rows) {
     const meta = { source: "app_users", uid: r.uid };
@@ -197,7 +198,8 @@ export function defaultMessage(c: { name: string; leadStatus: LeadStatus | null 
  */
 export async function convertLeadToAccount(db: Dbx, contactId: string, actor: Actor, opts: { name?: string } = {}): Promise<{ accountId: string; created: boolean }> {
   return db.transaction(async (tx) => {
-    const [c] = await tx.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
+    // FOR UPDATE: un doble envío (segunda pestaña, reintento) espera a que termine el primero y entonces ve la cuenta ya ligada.
+    const [c] = await tx.select().from(contacts).where(eq(contacts.id, contactId)).limit(1).for("update");
     if (!c) throw new Error("El contacto no existe.");
     const [linked] = await tx.select({ accountId: accountContacts.accountId }).from(accountContacts).where(eq(accountContacts.contactId, contactId)).limit(1);
     if (linked) return { accountId: linked.accountId, created: false };

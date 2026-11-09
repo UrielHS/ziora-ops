@@ -1,11 +1,13 @@
 import { and, eq, inArray, like } from "drizzle-orm";
 import type { Db } from "@/db";
-import { demoRequests } from "@/db/schema";
+import { demoRequests, demoStageEnum } from "@/db/schema";
+
+type DemoStage = (typeof demoStageEnum.enumValues)[number];
 import { listDemoEvents } from "@/integrations/google/calendar";
 import { requireEnv } from "@/lib/env";
 import { toCity, upsertContact } from "./contacts";
 import { parseDemoEvent, type ParsedDemoEvent } from "./demo-calendar";
-import { advanceLead, logActivity, SYSTEM_ACTOR } from "./leads";
+import { advanceLead, logActivity, SYSTEM_ACTOR, type Actor } from "./leads";
 import { fmtDateTime } from "@/lib/format";
 
 export type DemoInput = {
@@ -28,6 +30,17 @@ export type DemoInput = {
 export async function leadDemoScheduled(db: Db, contactId: string, scheduledAt: Date, demoId?: string) {
   await logActivity(db, { contactId, type: "demo", actor: SYSTEM_ACTOR, summary: `Demo agendada para ${fmtDateTime(scheduledAt)}`, meta: { demoId: demoId ?? null } });
   await advanceLead(db, contactId, "demo_agendada", SYSTEM_ACTOR, { demoId: demoId ?? null });
+}
+
+/** La etapa de la demo mueve al lead (solo hacia adelante); perderla o no asistir solo queda en el timeline. */
+export async function leadFromDemoStage(db: Db, contactId: string, stage: DemoStage, actor: Actor, demoId?: string) {
+  const meta = { demoId: demoId ?? null };
+  if (stage === "trial") await advanceLead(db, contactId, "en_trial", actor, meta);
+  else if (stage === "paid") await advanceLead(db, contactId, "pago", actor, meta);
+  else if (stage === "scheduled" || stage === "done") await advanceLead(db, contactId, "demo_agendada", actor, meta);
+  else if (stage === "lost" || stage === "no_show") {
+    await logActivity(db, { contactId, type: "demo", actor, summary: stage === "lost" ? "Demo perdida" : "No asistió a la demo", meta });
+  }
 }
 
 /** Crea la demo y crea o completa el contacto en Ziora Ops. Idempotente por externalId. */

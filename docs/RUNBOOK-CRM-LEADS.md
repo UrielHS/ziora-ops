@@ -98,7 +98,7 @@ export DATABASE_URL="postgres://ziora_ops:<contraseña>@localhost:5439/eventops"
   # → { "trial": n, "paid": n }  (cuántos leads avanzaron en esta corrida)
   ```
 - Una demo nueva desde ziora-copilot.com/demo deja al contacto en **Demo agendada** y una actividad "Demo agendada para …".
-- La baja de correo (`/api/unsubscribe?token=…`) muestra el botón "Sí, darme de baja" y, al confirmar, el lead en trabajo pasa a
+- La baja de correo (`/api/unsubscribe?t=…`) muestra el botón "Sí, darme de baja" y, al confirmar, el lead en trabajo pasa a
   **Perdido · baja**; quien ya está en trial o pagando solo recibe la nota en su historial.
 - Consultas útiles:
   ```sql

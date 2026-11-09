@@ -99,4 +99,20 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
     expect(ca.phoneE164).toBe(`5233${t}`);
     expect(cb).toMatchObject({ phoneE164: null, phone: `5233${t}`, details: { telefono_duplicado_de: a.id } });
   });
+
+  it("un lead solo-teléfono al que después le agregan correo se completa, no se duplica", async () => {
+    const { db } = await import("@/db");
+    const { contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const t = Date.now().toString().slice(-8);
+    const a = await upsertContact(db, { name: "Solo Tel", phone: `55${t}`, source: "sheet_import", tags: ["lead"], leadStatus: "nuevo" });
+    await db.update(contacts).set({ leadStatus: "contactado" }).where(eq(contacts.id, a.id));
+    const b = await upsertContact(db, { name: "Solo Tel", email: `solotel${t}@example.com`, phone: `+52 55 ${t}`, source: "sheet_import", tags: ["lead"], leadStatus: "nuevo" });
+    expect(b).toEqual({ id: a.id, created: false });
+    const rows = await db.select().from(contacts).where(eq(contacts.phoneE164, `5255${t}`));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ email: `solotel${t}@example.com`, leadStatus: "contactado" });
+    const dup = await db.select({ id: contacts.id }).from(contacts).where(eq(contacts.email, `solotel${t}@example.com`));
+    expect(dup).toHaveLength(1);
+  });
 });

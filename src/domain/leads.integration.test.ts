@@ -155,4 +155,54 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
     expect(c.leadStatus).toBe("respondio"); // convertir no cambia el estado del lead
   });
+
+  it("un rebote de correo quita el permiso y deja nota sin perder el lead; una queja sí lo marca perdido", async () => {
+    const { db } = await import("@/db");
+    const { contactActivities, contactConsents, contacts } = await import("@/db/schema");
+    const { emailBounced, optOutByEmail, upsertContact } = await import("./contacts");
+    const t = Date.now();
+    const email = `rebote${t}@example.com`;
+    const { id } = await upsertContact(db, { name: "Rebote", email, source: "manual", tags: ["lead"], leadStatus: "contactado", consents: [{ channel: "email", source: "evento_luma" }] });
+
+    await emailBounced(db, email);
+    const [c1] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c1.leadStatus).toBe("contactado");
+    const [k] = await db.select().from(contactConsents).where(eq(contactConsents.contactId, id));
+    expect(k).toMatchObject({ channel: "email", optIn: false });
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
+    expect(acts.some((a) => a.type === "sistema" && /rebot/i.test(a.summary))).toBe(true);
+
+    await optOutByEmail(db, email);
+    const [c2] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c2).toMatchObject({ leadStatus: "perdido", lostReason: "baja" });
+  });
+
+  it("el sync de usuarios no convierte en lead a un contacto que no lo es", async () => {
+    const { db } = await import("@/db");
+    const { appUsers, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { syncLeadStatusFromAppUsers } = await import("./leads");
+    const t = Date.now();
+    const email = `equipo${t}@example.com`;
+    const { id } = await upsertContact(db, { name: "Del Equipo", email, source: "manual", tags: [] });
+    await db.insert(appUsers).values({ uid: `e${t}`, email, plan: "pro", status: "trialing", syncedAt: new Date() });
+    await syncLeadStatusFromAppUsers(db);
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.leadStatus).toBeNull();
+  });
+
+  it("cambiar la etapa de una demo avanza al lead igual que arrastrarla; perderla solo deja actividad", async () => {
+    const { db } = await import("@/db");
+    const { contactActivities, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { leadFromDemoStage } = await import("./demos");
+    const t = Date.now();
+    const { id } = await upsertContact(db, { name: "Demo Etapa", email: `etapa${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "respondio" });
+    await leadFromDemoStage(db, id, "trial", actor);
+    expect((await db.select().from(contacts).where(eq(contacts.id, id)))[0].leadStatus).toBe("en_trial");
+    await leadFromDemoStage(db, id, "lost", actor);
+    expect((await db.select().from(contacts).where(eq(contacts.id, id)))[0].leadStatus).toBe("en_trial");
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
+    expect(acts.some((a) => a.type === "demo" && a.summary === "Demo perdida")).toBe(true);
+  });
 });

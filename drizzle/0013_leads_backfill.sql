@@ -10,7 +10,8 @@ WITH objetivo AS (
               WHEN u.status ILIKE '%trial%' THEN 'en_trial' END::"ops"."lead_status" AS nuevo_estado
   FROM "ops"."contacts" c
   JOIN "ops"."app_users" u ON lower(trim(u.email)) = c.email
-  WHERE u.removed_at IS NULL AND u.is_test = false AND c.lead_status IS DISTINCT FROM 'perdido'
+  -- Solo quien ya es lead (etiqueta lead → nuevo en el paso anterior): el equipo y quien llegó solo a la app no entran al embudo.
+  WHERE u.removed_at IS NULL AND u.is_test = false AND c.lead_status IS NOT NULL AND c.lead_status <> 'perdido'
 )
 UPDATE "ops"."contacts" c SET lead_status = o.nuevo_estado, status_changed_at = now()
 FROM objetivo o
@@ -30,7 +31,7 @@ WITH ultima AS (
 )
 UPDATE "ops"."contacts" c SET lead_status = o.nuevo_estado, status_changed_at = now()
 FROM objetivo o
-WHERE c.id = o.id AND o.nuevo_estado IS NOT NULL AND c.lead_status IS DISTINCT FROM 'perdido'
+WHERE c.id = o.id AND o.nuevo_estado IS NOT NULL AND c.lead_status IS NOT NULL AND c.lead_status <> 'perdido'
   AND array_position(ARRAY['nuevo','contactado','respondio','demo_agendada','en_trial','pago'], o.nuevo_estado::text)
       > coalesce(array_position(ARRAY['nuevo','contactado','respondio','demo_agendada','en_trial','pago'], c.lead_status::text), 0);--> statement-breakpoint
 -- Demo perdida o sin asistir → perdido, solo si el lead sigue en trabajo (nuevo/contactado/respondio o sin estado).
@@ -44,7 +45,7 @@ SET lead_status = 'perdido', lost_reason = coalesce(nullif(trim(u.lost_reason), 
     status_changed_at = now()
 FROM ultima u
 WHERE c.id = u.contact_id AND u.stage IN ('lost', 'no_show')
-  AND (c.lead_status IS NULL OR c.lead_status IN ('nuevo', 'contactado', 'respondio'));--> statement-breakpoint
+  AND c.lead_status IN ('nuevo', 'contactado', 'respondio');--> statement-breakpoint
 -- Una actividad de sistema por lead para que el timeline no empiece vacío.
 INSERT INTO "ops"."contact_activities" (contact_id, type, direction, actor_label, summary, meta)
 SELECT c.id, 'sistema', 'ninguna', 'sistema', 'Estado inicial por backfill: ' || c.lead_status::text, '{"backfill":"0013"}'::jsonb
