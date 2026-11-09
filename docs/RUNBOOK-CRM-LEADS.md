@@ -1,4 +1,4 @@
-# Runbook · CRM de leads (fase 0 y fase 1)
+# Runbook · CRM de leads (fases 0, 1 y 2)
 
 Cómo llevar a producción el CRM de leads de Ziora Ops y dejarlo operando. Diseño: `docs/superpowers/specs/2026-11-10-crm-leads-design.md`.
 Plan de implementación: `docs/superpowers/plans/2026-11-10-crm-leads-fase0-fase1.md`.
@@ -125,3 +125,64 @@ necesario para que la app anterior funcione.
 - La **baja de correo gana siempre**: una importación posterior con consentimiento no vuelve a suscribir a quien se dio de baja.
 - Las cuentas de prueba (`is_test`) y las borradas de la app no mueven leads.
 - Nada clínico vive aquí: un lead es nombre, contacto, puesto, enfoque y lo que la persona dijo; nunca datos de sus pacientes.
+
+## 7. Fase 2 · Cadencia (secuencias de correo + WhatsApp)
+
+Qué es: una secuencia es una lista de pasos con día y canal (la semilla «MTW 4 toques» va D0 correo, D3 WhatsApp, D7 correo,
+D14 WhatsApp). Los correos los manda el sistema (Resend) a las 10:00 CDMX del día que toca; los WhatsApp **no se mandan solos**:
+aparecen en `/leads/hoy` del dueño como «Toque N de 4 · WhatsApp» con el texto listo, y «Ya lo mandé» completa el paso.
+Se detiene sola al responder, agendar demo, entrar a trial, pagar, marcar perdido o darse de baja. Textos y reglas:
+`docs/secuencia-mtw.md`.
+
+### 7.1 Orden tras el merge
+
+1. **Merge del PR** a `main`. `deploy.yml` corre la migración `0014_cadencia` (tres tablas nuevas, dos enums; nada toca
+   `ops.contacts`). Hasta aquí no pasa nada visible: no hay secuencias y nadie queda enrolado solo.
+2. **Sembrar la secuencia MTW, solo con la aprobación de Chris a los textos** de `docs/secuencia-mtw.md`. Con el proxy de §2:
+   ```bash
+   export DATABASE_URL=...   # usuario ziora_ops por el túnel, como en §2
+   npx tsx dev/seed-secuencia-mtw.ts     # → "creada"; volver a correrlo solo actualiza textos
+   ```
+   Verificar en `/leads/secuencias`: 4 pasos, 0 activos.
+3. **Crear el scheduler** (una vez; `$R`, `$P` y `$URL` como en `docs/SETUP-CONEXION.md`):
+   ```bash
+   gcloud scheduler jobs create http ziora-ops-run-sequences --location $R --project $P      --schedule "0 8-19 * * *" --time-zone "America/Mexico_City" --http-method POST      --uri "$URL/api/jobs/run-sequences"      --headers "Authorization=Bearer $(gcloud secrets versions access latest --secret=ziora-ops-job-secret --project $P)"
+   ```
+   Corre cada hora de 08:00 a 19:00 CDMX; fuera de la ventana 08:00–20:00 el job responde `skippedWindow` y no hace nada.
+   El paso de cada día se programa a las 10:00, así que la corrida de las 10 es la que manda.
+4. **Enrolar por tandas.** Desde `/leads` → «Ver todos» → filtrar (p. ej. COLD sin dueño) → seleccionar **10 leads** →
+   «Enrolar en secuencia». Esperar la corrida de las 10:00 del día siguiente (o lanzarla a mano, §7.2), revisar en Resend que
+   salieron los 10 correos y que `/leads/secuencias` cuenta 10 activos y 10 correos enviados. Si todo cuadra, el resto por
+   tandas de 50. También se puede enrolar al importar la hoja (select «Enrolar en secuencia» en Contactos) y desde la ficha.
+   Solo entran leads en **Nuevo** o **Contactado** con correo y consentimiento; los demás se omiten y el mensaje lo dice.
+
+### 7.2 Verificación
+
+```bash
+curl -s -X POST "$URL/api/jobs/run-sequences"   -H "Authorization: Bearer $(gcloud secrets versions access latest --secret=ziora-ops-job-secret --project $P)"
+# → {"ok":true,"sent":n,"pendingWhatsapp":n,"skipped":n,"finished":n,"stopped":n}  (o {"ok":true,"skippedWindow":true} fuera de 08–20 CDMX)
+```
+
+- La ficha de un lead enrolado muestra el panel **Cadencia** (estado, N de 4 toques, siguiente paso) y en el historial
+  «Enrolado en «MTW 4 toques»» y, tras la corrida, «Secuencia «MTW 4 toques» · toque 1: <asunto>».
+- Al día 3, `/leads/hoy` del dueño muestra «Toque 2 de 4 · WhatsApp» con el texto de la secuencia; «Ya lo mandé» lo completa.
+  Si el lead no tiene dueño, el WhatsApp aparece en «Ver los de todos»: alguien tiene que tomarlo.
+- Consultas útiles:
+  ```sql
+  select status, stop_reason, count(*) from ops.sequence_enrollments group by 1,2 order by 1,2;
+  select count(*) from ops.contact_activities where type = 'correo' and meta ? 'sequenceId';
+  ```
+- Si un correo falla (Resend caído, llave mal), queda una actividad `sistema` «Paso N de correo falló» y se reintenta en una
+  hora; no se pierde el paso.
+
+### 7.3 Rollback
+
+```bash
+gcloud scheduler jobs pause ziora-ops-run-sequences --location $R --project $P   # deja de mandar; nada más corre solo
+```
+```sql
+update ops.sequence_enrollments set status = 'detenida', stop_reason = 'rollback', pending_step_id = null, pending_text = null,
+  pending_since = null, next_run_at = null where status = 'activa';   -- si hay que parar también los WhatsApp pendientes
+```
+La migración `0014` no estorba al código anterior: volver a la revisión previa de Cloud Run funciona sin revertirla. Para
+reanudar: `gcloud scheduler jobs resume ziora-ops-run-sequences …` y volver a enrolar (los detenidos no se reactivan solos).

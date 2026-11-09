@@ -34,6 +34,7 @@ Integraciones: Resend (correo) y Octokit (GitHub).
 | `POST /api/jobs/send-campaign` | Envía una campaña | Bearer `JOB_SECRET` |
 | `POST /api/jobs/sync-ziora-users` | Usuarios, planes y conteos de la app (cada hora) y seguimientos sugeridos | Bearer `JOB_SECRET` |
 | `POST /api/jobs/sync-social` | Métricas de Instagram, Facebook y Meta Ads (diario) | Bearer `JOB_SECRET` |
+| `POST /api/jobs/run-sequences` | Cadencia de leads: manda los correos que tocan y deja los WhatsApp listos en "Mi día" (cada hora, 08–20 CDMX) | Bearer `JOB_SECRET` |
 | `POST /api/webhooks/ziora-help` | "Ayuda y sugerencias" de la app → tickets | HMAC `X-Ops-Signature` |
 | `GET /api/health` | Conexión a la BD y a ambos schemas | Pública, sin datos |
 
@@ -66,7 +67,7 @@ en producción se ignora y el login es con Google.
 | Anuncios | Gasto, CPL y costo real por demo y por cliente (UTM) |
 | Tickets | Cambios e ideas como historia de usuario, con impacto, esfuerzo y viabilidad |
 | Tareas | Tablero con arrastrar y soltar, lista, filtros por sprint/épica/persona, sprints, bloqueos |
-| Leads | Embudo fijo (nuevo → contactado → respondió → demo → trial → pagó / perdido) con kanban, filtros, selección múltiple, ficha con timeline y toques, "Mi día" con mensaje de WhatsApp prellenado; avanza solo con demos y usuarios de la app; convertir director en cuenta B2B |
+| Leads | Embudo fijo (nuevo → contactado → respondió → demo → trial → pagó / perdido) con kanban, filtros, selección múltiple, ficha con timeline y toques, "Mi día" con mensaje de WhatsApp prellenado; avanza solo con demos y usuarios de la app; convertir director en cuenta B2B. **Secuencias** (`/leads/secuencias`): cadencia de correos automáticos (Resend, 10:00 CDMX) y WhatsApp que aparecen listos en "Mi día" como «Toque N de 4»; se enrola desde el kanban, la ficha o la importación y se detiene sola al responder, agendar, pagar, perder o darse de baja |
 | Demos | Pipeline arrastrable, embudo, registro manual, WhatsApp, trial día X/14, tarea de seguimiento |
 | Contactos | Base propia (`ops.contacts`), importación desde Event Ops y desde la hoja de leads (CSV, con teléfono), filtros, etiquetas, permiso por canal con evidencia |
 | Contenido | Calendario mensual, mezcla 60/25/15, cadencia semanal, checklist legal obligatoria para aprobar |
@@ -110,6 +111,7 @@ npm test             # unitarias; con RUN_DB_TESTS=1 y DATABASE_URL también las
 npm run typecheck
 npm run db:generate  # migración nueva del schema ops
 npm run db:migrate
+npx tsx dev/seed-secuencia-mtw.ts   # secuencia «MTW 4 toques» (idempotente; textos en docs/secuencia-mtw.md)
 ```
 
 ## Estado

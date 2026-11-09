@@ -193,6 +193,16 @@ gcloud scheduler jobs create http ziora-ops-sync-github --location $R --project 
   --headers "Authorization=Bearer $(gcloud secrets versions access latest --secret=ziora-ops-job-secret --project $P)"
 ```
 
+## 9b. Cadencia de leads (secuencias)
+
+Los correos de las secuencias salen por Resend (§8) y los lanza un job cada hora dentro de la ventana 08:00–20:00 CDMX.
+Se crea una vez, después del primer deploy con la migración `0014_cadencia` (detalle, semilla y rollback en
+`docs/RUNBOOK-CRM-LEADS.md` §7):
+
+```bash
+gcloud scheduler jobs create http ziora-ops-run-sequences --location $R --project $P   --schedule "0 8-19 * * *" --time-zone "America/Mexico_City" --http-method POST   --uri "$URL/api/jobs/run-sequences"   --headers "Authorization=Bearer $(gcloud secrets versions access latest --secret=ziora-ops-job-secret --project $P)"
+```
+
 ## 10. Demos desde el Google Calendar del CEO
 
 Las demos de ziora-copilot.com/demo se agendan directo en el calendario del CEO. Ziora Ops lee ese calendario
