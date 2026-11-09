@@ -95,15 +95,21 @@ const _importEventOps = formAction(
 
 const MAX_CSV = 5 * 1024 * 1024;
 const _importLeads = formAction(
-  z.object({ file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB") }),
-  async ({ file }) => {
+  z.object({
+    file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB"),
+    consentSource: z.enum(["evento_luma"]).optional(),
+    ownerId: z.uuid().optional(),
+  }),
+  async ({ file, consentSource, ownerId }) => {
     await requirePermission("contacts.import");
     const { rows, skipped } = parseLeadSheet(await file.text());
-    if (!rows.length) throw new Error("No encontré filas con correo válido.");
-    const r = await importLeadSheet(db, rows);
+    if (!rows.length) throw new Error("No encontré filas con correo o teléfono válido.");
+    const r = await importLeadSheet(db, rows, { consentSource: consentSource ?? null, ownerId: ownerId ?? null });
     revalidatePath("/contacts");
+    revalidatePath("/leads", "layout");
+    const soloTel = rows.filter((x) => !x.email).length;
     const skip = skipped.length ? ` · ${skipped.length} filas saltadas (${skipped.slice(0, 3).map((x) => `fila ${x.line}: ${x.reason}`).join("; ")}${skipped.length > 3 ? "…" : ""})` : "";
-    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${skip}.`;
+    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${soloTel ? ` · ${soloTel} solo con teléfono` : ""}${skip}.`;
   },
 );
 

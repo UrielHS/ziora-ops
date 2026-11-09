@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { contactConsents, contacts, contactTagEnum, contactTags, type CityValue, type ContactSource, type ContactTag } from "@/db/schema";
+import { contactConsents, contacts, contactTagEnum, contactTags, type CityValue, type ContactSource, type ContactTag, type LeadStatus } from "@/db/schema";
+import { normalizePhoneE164 } from "./phone";
 import { eoContacts, eoContactTags, organizations } from "@/db/shared";
 
 export function normalizeEmail(email: string): string {
@@ -17,10 +18,22 @@ export function toCity(raw?: string | null): CityValue | null {
   return CITY_ALIASES[raw.trim().toLowerCase()] ?? "other";
 }
 
+export type ConsentInput = { channel: "email" | "whatsapp"; source: string; evidence?: string };
+
 type UpsertInput = {
   name: string;
-  email: string;
+  /** Correo o teléfono: hace falta al menos uno para poder buscar el contacto. */
+  email?: string | null;
   phone?: string | null;
+  /** Solo dígitos (525512345678). Si no viene, se calcula del teléfono. */
+  phoneE164?: string | null;
+  // Lead (CRM). Nunca pisan lo que ya estaba.
+  leadStatus?: LeadStatus | null;
+  priority?: number | null;
+  segment?: string | null;
+  ownerId?: string | null;
+  /** Consentimiento por canal; azúcar: marketingOptIn equivale a consents: [{ channel: "email", ... }]. */
+  consents?: ConsentInput[];
   company?: string | null;
   jobTitle?: string | null;
   city?: CityValue | null;
@@ -42,48 +55,66 @@ type UpsertInput = {
 const TAGS = new Set<string>(contactTagEnum.enumValues);
 
 /**
- * Crea o completa un contacto de Ziora Ops (ops.contacts), buscándolo por correo.
- * Nunca pisa datos existentes: solo llena lo vacío, agrega etiquetas y suma columnas nuevas a details.
+ * Crea o completa un contacto de Ziora Ops (ops.contacts), buscándolo por correo o, si no hay correo, por teléfono E.164.
+ * Nunca pisa datos existentes: solo llena lo vacío, agrega etiquetas, consentimientos y suma columnas nuevas a details.
  */
 export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: string; created: boolean }> {
-  const email = normalizeEmail(input.email);
+  const email = input.email ? normalizeEmail(input.email) : null;
+  const phoneE164 = input.phoneE164 ?? normalizePhoneE164(input.phone);
+  if (!email && !phoneE164) throw new Error("Un contacto necesita correo o teléfono válido.");
   const fill = <T>(cur: T | null, next: T | null | undefined) => cur ?? next ?? null;
+  const consents: ConsentInput[] = [
+    ...(input.consents ?? []),
+    ...(input.marketingOptIn ? [{ channel: "email" as const, ...input.marketingOptIn }] : []),
+  ];
   return db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(contacts).where(eq(contacts.email, email)).limit(1);
+    const [existing] = email
+      ? await tx.select().from(contacts).where(eq(contacts.email, email)).limit(1)
+      : await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164!)).limit(1);
+    // El teléfono normalizado es único: si ya lo tiene otro contacto, se deja una nota en vez de romper.
+    let nextPhoneE164 = existing?.phoneE164 ?? phoneE164 ?? null;
+    const extra: Record<string, unknown> = {};
+    if (nextPhoneE164 && !existing?.phoneE164) {
+      const [owner] = await tx.select({ id: contacts.id }).from(contacts).where(eq(contacts.phoneE164, nextPhoneE164)).limit(1);
+      if (owner && owner.id !== existing?.id) { nextPhoneE164 = null; extra.telefono_duplicado_de = owner.id; }
+    }
     let id: string;
     if (existing) {
       id = existing.id;
       await tx.update(contacts).set({
-        phone: fill(existing.phone, input.phone), company: fill(existing.company, input.company),
+        phone: fill(existing.phone, input.phone), phoneE164: nextPhoneE164, company: fill(existing.company, input.company),
         jobTitle: fill(existing.jobTitle, input.jobTitle), city: fill(existing.city, input.city),
         cityName: fill(existing.cityName, input.cityName),
         patientsPerWeek: fill(existing.patientsPerWeek, input.patientsPerWeek), approach: fill(existing.approach, input.approach),
         documentation: fill(existing.documentation, input.documentation), aiUsage: fill(existing.aiUsage, input.aiUsage),
         linkedinUrl: fill(existing.linkedinUrl, input.linkedinUrl), website: fill(existing.website, input.website),
         notes: fill(existing.notes, input.notes), eventOpsContactId: fill(existing.eventOpsContactId, input.eventOpsContactId),
+        leadStatus: fill(existing.leadStatus, input.leadStatus),
+        statusChangedAt: existing.leadStatus || !input.leadStatus ? existing.statusChangedAt : new Date(),
+        priority: fill(existing.priority, input.priority), segment: fill(existing.segment, input.segment),
+        ownerId: fill(existing.ownerId, input.ownerId),
         // Lo que ya tenía gana sobre lo importado.
-        details: sql`${JSON.stringify(input.details ?? {})}::jsonb || ${contacts.details}`,
+        details: sql`${JSON.stringify({ ...(input.details ?? {}), ...extra })}::jsonb || ${contacts.details}`,
       }).where(eq(contacts.id, id));
     } else {
       const [row] = await tx.insert(contacts).values({
-        name: input.name.trim() || email, email, phone: input.phone ?? null, company: input.company ?? null,
+        name: input.name.trim() || email || phoneE164!, email, phone: input.phone ?? null, phoneE164: nextPhoneE164, company: input.company ?? null,
         jobTitle: input.jobTitle ?? null, city: input.city ?? null, cityName: input.cityName ?? null,
         patientsPerWeek: input.patientsPerWeek ?? null, approach: input.approach ?? null,
         documentation: input.documentation ?? null, aiUsage: input.aiUsage ?? null, linkedinUrl: input.linkedinUrl ?? null,
-        website: input.website ?? null, notes: input.notes ?? null, source: input.source, details: input.details ?? {},
+        website: input.website ?? null, notes: input.notes ?? null, source: input.source, details: { ...(input.details ?? {}), ...extra },
         eventOpsContactId: input.eventOpsContactId ?? null,
+        leadStatus: input.leadStatus ?? null, statusChangedAt: input.leadStatus ? new Date() : null,
+        priority: input.priority ?? null, segment: input.segment ?? null, ownerId: input.ownerId ?? null,
       }).returning({ id: contacts.id });
       id = row.id;
     }
     const tags = input.tags.filter((t) => TAGS.has(t));
     if (tags.length) await tx.insert(contactTags).values(tags.map((tag) => ({ contactId: id, tag }))).onConflictDoNothing();
-    if (input.marketingOptIn) {
+    for (const c of consents) {
       await tx
         .insert(contactConsents)
-        .values({
-          contactId: id, channel: "email", optIn: true, source: input.marketingOptIn.source,
-          evidence: input.marketingOptIn.evidence, optedInAt: new Date(),
-        })
+        .values({ contactId: id, channel: c.channel, optIn: true, source: c.source, evidence: c.evidence, optedInAt: new Date() })
         .onConflictDoUpdate({
           target: [contactConsents.contactId, contactConsents.channel],
           // Una baja previa gana: no se re-suscribe automáticamente a quien se dio de baja.

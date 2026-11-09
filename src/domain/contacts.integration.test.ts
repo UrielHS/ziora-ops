@@ -58,10 +58,45 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
 
     const [dani] = await db.select().from(contacts).where(eq(contacts.email, `dani${t}@example.com`));
     expect(dani).toMatchObject({ name: "Dani Ya Existía", phone: "+52 1", jobTitle: "Psicólogo/a en clínica o consultorio", patientsPerWeek: "6 a 10", city: "cdmx", cityName: "Cdmx" });
-    expect(dani.details).toEqual({}); // Prioridad y Asistió Panel no se guardan
+    expect(dani).toMatchObject({ priority: 2, leadStatus: "nuevo", details: { eventos: { panel: true, taller: false } } }); // Prioridad y asistencia sí se guardan (CRM)
     const tags = (await db.select().from(contactTags).where(eq(contactTags.contactId, dani.id))).map((x) => x.tag).sort();
     expect(tags).toEqual(["lead", "psychologist"]);
     const [eli] = await db.select().from(contacts).where(eq(contacts.email, `eli${t}@example.com`));
     expect(eli).toMatchObject({ source: "sheet_import", city: "mty", cityName: "Monterrey", jobTitle: "Otro" });
+  });
+
+  it("importa solo-teléfono, deduplica por teléfono y no pisa estado ni prioridad al reimportar", async () => {
+    const { db } = await import("@/db");
+    const { contactConsents, contacts } = await import("@/db/schema");
+    const { importLeadSheet, parseLeadSheet } = await import("./lead-sheet");
+    const t = Date.now().toString().slice(-8);
+    const csv = `Prioridad,Segmento,Nombre,Email,Teléfono
+2,🟠 WARM-A,Tel Uno,,55${t}
+`;
+    const r1 = await importLeadSheet(db, parseLeadSheet(csv).rows, { consentSource: "evento_luma" });
+    expect(r1).toEqual({ created: 1, completed: 0 });
+    const [c] = await db.select().from(contacts).where(eq(contacts.phoneE164, `5255${t}`));
+    expect(c).toMatchObject({ email: null, leadStatus: "nuevo", priority: 2, segment: "WARM-A" });
+    const cons = await db.select().from(contactConsents).where(eq(contactConsents.contactId, c.id));
+    expect(cons.map((x) => [x.channel, x.optIn, x.source]).sort()).toEqual([["email", true, "evento_luma"], ["whatsapp", true, "evento_luma"]]);
+
+    await db.update(contacts).set({ leadStatus: "contactado", priority: 1 }).where(eq(contacts.id, c.id));
+    const r2 = await importLeadSheet(db, parseLeadSheet(csv.replace(`55${t}`, `+52 55 ${t}`)).rows, { consentSource: "evento_luma" });
+    expect(r2).toEqual({ created: 0, completed: 1 });
+    const [again] = await db.select().from(contacts).where(eq(contacts.id, c.id));
+    expect(again).toMatchObject({ leadStatus: "contactado", priority: 1 });
+  });
+
+  it("dos correos distintos con el mismo teléfono: el segundo queda sin phone_e164 y con nota, nunca rompe", async () => {
+    const { db } = await import("@/db");
+    const { contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const t = Date.now().toString().slice(-8);
+    const a = await upsertContact(db, { name: "Tel A", email: `tela${t}@example.com`, phone: `+52 33 ${t}`, source: "manual", tags: [] });
+    const b = await upsertContact(db, { name: "Tel B", email: `telb${t}@example.com`, phone: `5233${t}`, source: "manual", tags: [] });
+    const [ca] = await db.select().from(contacts).where(eq(contacts.id, a.id));
+    const [cb] = await db.select().from(contacts).where(eq(contacts.id, b.id));
+    expect(ca.phoneE164).toBe(`5233${t}`);
+    expect(cb).toMatchObject({ phoneE164: null, phone: `5233${t}`, details: { telefono_duplicado_de: a.id } });
   });
 });
