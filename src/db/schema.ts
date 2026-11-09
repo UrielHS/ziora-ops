@@ -347,6 +347,69 @@ export const contactActivities = ops.table(
   (t) => [index("contact_activities_contact_idx").on(t.contactId, t.occurredAt)],
 );
 
+// ---------- CRM: cadencia (secuencias de toques) ----------
+// Solo tablas nuevas: no toca contacts ni datos existentes. Nada se enrola solo; el job únicamente actúa sobre sequence_enrollments.
+export const sequenceChannelEnum = ops.enum("sequence_channel", ["email", "whatsapp"]);
+export const enrollmentStatusEnum = ops.enum("enrollment_status", ["activa", "terminada", "detenida"]);
+export type SequenceChannel = (typeof sequenceChannelEnum.enumValues)[number];
+export type EnrollmentStatus = (typeof enrollmentStatusEnum.enumValues)[number];
+
+export const sequences = ops.table(
+  "sequences",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+    stopOnReply: boolean("stop_on_reply").notNull().default(true),
+    maxTouches: integer("max_touches").notNull().default(4),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("sequences_name_unique").on(t.name)],
+);
+
+export const sequenceSteps = ops.table(
+  "sequence_steps",
+  {
+    id: id(),
+    sequenceId: uuid("sequence_id").notNull().references(() => sequences.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    dayOffset: integer("day_offset").notNull(), // días después de enrolar (0, 3, 7, 14)
+    channel: sequenceChannelEnum("channel").notNull(),
+    emailTemplateId: uuid("email_template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
+    whatsappText: text("whatsapp_text"), // mismas variables {{nombre}} que las plantillas; texto plano
+  },
+  (t) => [uniqueIndex("sequence_steps_position_unique").on(t.sequenceId, t.position)],
+);
+
+export const sequenceEnrollments = ops.table(
+  "sequence_enrollments",
+  {
+    id: id(),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    sequenceId: uuid("sequence_id").notNull().references(() => sequences.id, { onDelete: "cascade" }),
+    currentStep: integer("current_step").notNull().default(1), // posición del próximo paso a ejecutar
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    status: enrollmentStatusEnum("status").notNull().default("activa"),
+    stopReason: text("stop_reason"), // respondio · perdido · baja · tope · manual · completada · sin_canal
+    touches: integer("touches").notNull().default(0), // pasos ejecutados (correo enviado o WhatsApp marcado); los omitidos no cuentan
+    // Toque de WhatsApp pendiente: el job no envía WhatsApp, lo deja listo para que el dueño lo mande desde Hoy.
+    pendingStepId: uuid("pending_step_id").references(() => sequenceSteps.id, { onDelete: "set null" }),
+    pendingText: text("pending_text"),
+    pendingSince: timestamp("pending_since", { withTimezone: true }),
+    enrolledBy: uuid("enrolled_by").references(() => users.id, { onDelete: "set null" }),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("enrollments_active_unique").on(t.contactId, t.sequenceId).where(sql`${t.status} = 'activa'`),
+    index("enrollments_due_idx").on(t.status, t.nextRunAt),
+  ],
+);
+export type Sequence = typeof sequences.$inferSelect;
+export type SequenceStep = typeof sequenceSteps.$inferSelect;
+export type SequenceEnrollment = typeof sequenceEnrollments.$inferSelect;
+
 // ---------- marketing: calendario de contenido (plan GTM 90 días) ----------
 export const contentPieces = ops.table(
   "content_pieces",

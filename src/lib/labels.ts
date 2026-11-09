@@ -217,6 +217,14 @@ export const LEAD_PRIORITY = {
   3: { label: "Baja", tone: "gray" },
 } as const satisfies Record<number, { label: string; tone: Tone }>;
 
+export const ENROLLMENT_STATUS = {
+  activa: { label: "Activa", tone: "green" },
+  terminada: { label: "Terminada", tone: "gray" },
+  detenida: { label: "Detenida", tone: "amber" },
+} as const satisfies Record<string, { label: string; tone: Tone }>;
+
+export const SEQUENCE_CHANNEL = { email: "Correo", whatsapp: "WhatsApp" } as const;
+
 export const ACTIVITY_TYPE = {
   nota: "Nota", whatsapp: "WhatsApp", correo: "Correo", llamada: "Llamada", reunion: "Reunión",
   cambio_estado: "Cambio de estado", demo: "Demo", campana: "Campaña", secuencia: "Secuencia", sistema: "Sistema",
