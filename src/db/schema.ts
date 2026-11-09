@@ -27,6 +27,10 @@ export type CityValue = (typeof cityEnum.enumValues)[number];
 export type ContactSource = (typeof contactSourceEnum.enumValues)[number];
 export type ContactTag = (typeof contactTagEnum.enumValues)[number];
 
+/** Embudo de leads (CRM). Orden: nuevo < contactado < respondio < demo_agendada < en_trial < pago; perdido es terminal. */
+export const leadStatusEnum = ops.enum("lead_status", ["nuevo", "contactado", "respondio", "demo_agendada", "en_trial", "pago", "perdido"]);
+export type LeadStatus = (typeof leadStatusEnum.enumValues)[number];
+
 export const contacts = ops.table(
   "contacts",
   {
@@ -50,13 +54,28 @@ export const contacts = ops.table(
     // Columnas de la importación que no tienen campo propio (se guardan tal cual vienen en la hoja).
     details: jsonb("details").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     eventOpsContactId: uuid("event_ops_contact_id"), // de qué contacto de Event Ops se copió, si aplica
+    // --- Lead (CRM). Null en lead_status = el contacto no es un lead que se esté trabajando.
+    phoneE164: text("phone_e164"), // solo dígitos, p. ej. 525512345678; único cuando no es null
+    leadStatus: leadStatusEnum("lead_status"),
+    lostReason: text("lost_reason"),
+    statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
+    ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
+    nextAction: text("next_action"),
+    nextActionOn: date("next_action_on"),
+    lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
+    priority: integer("priority"), // 1 HOT · 2 WARM · 3 COLD
+    segment: text("segment"), // segmento de la hoja de leads, tal cual (HOT, WARM-A, COLD-Virtual…)
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
   (t) => [
     uniqueIndex("contacts_email_unique").on(t.email),
     uniqueIndex("contacts_event_ops_unique").on(t.eventOpsContactId),
+    uniqueIndex("contacts_phone_e164_unique").on(t.phoneE164).where(sql`${t.phoneE164} is not null`),
     index("contacts_name_idx").on(t.name),
+    index("contacts_lead_status_idx").on(t.leadStatus),
+    index("contacts_owner_idx").on(t.ownerId),
+    index("contacts_next_action_idx").on(t.nextActionOn),
   ],
 );
 
@@ -305,6 +324,27 @@ export const contactConsents = ops.table(
     ...timestamps(),
   },
   (t) => [primaryKey({ columns: [t.contactId, t.channel] })],
+);
+
+export const activityTypeEnum = ops.enum("activity_type", ["nota", "whatsapp", "correo", "llamada", "reunion", "cambio_estado", "demo", "campana", "secuencia", "sistema"]);
+export const activityDirectionEnum = ops.enum("activity_direction", ["saliente", "entrante", "ninguna"]);
+export type ActivityType = (typeof activityTypeEnum.enumValues)[number];
+
+/** Timeline del contacto: cada toque, respuesta, cambio de estado o evento del sistema. Solo se agrega, no se edita. */
+export const contactActivities = ops.table(
+  "contact_activities",
+  {
+    id: id(),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    type: activityTypeEnum("type").notNull(),
+    direction: activityDirectionEnum("direction").notNull().default("ninguna"),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorLabel: text("actor_label").notNull(), // nombre de la persona, "sistema" o "token:<nombre>"
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    summary: text("summary").notNull(),
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => [index("contact_activities_contact_idx").on(t.contactId, t.occurredAt)],
 );
 
 // ---------- marketing: calendario de contenido (plan GTM 90 días) ----------

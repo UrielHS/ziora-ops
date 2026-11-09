@@ -85,6 +85,13 @@
       "when": 1794246113626,
       "tag": "0011_contenido_canales_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794250742845,
+      "tag": "0012_leads_columnas",
+      "breakpoints": true
     }
   ]
 }
