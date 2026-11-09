@@ -70,7 +70,8 @@ async function setup() {
   async function mkLead(opts: { leadStatus?: "nuevo" | "contactado" | "en_trial"; phone?: boolean; email?: boolean; ownerId?: string | null } = {}) {
     n++;
     const email = opts.email === false ? null : `cad${t}-${n}@example.com`;
-    const phone = opts.phone === false ? null : `+52 55 ${String(t).slice(-4)} ${String(n).padStart(4, "0")}`;
+    // 10 dígitos únicos por setup: seis del timestamp + el consecutivo. Con menos, chocaba con leads de corridas anteriores (phone_e164 es único).
+    const phone = opts.phone === false ? null : `+52 55${String(t).slice(-6)}${String(n).padStart(2, "0")}`;
     const { id } = await contactsMod.upsertContact(db, {
       name: `Ana Lead ${n}`, email, phone, source: "manual", tags: ["lead"], leadStatus: opts.leadStatus ?? "nuevo", cityName: "CDMX",
       ownerId: opts.ownerId === undefined ? owner.id : opts.ownerId,
