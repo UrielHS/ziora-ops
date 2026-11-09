@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { and, count, eq, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or } from "drizzle-orm";
 import { ArrowUpRight } from "lucide-react";
 import { Card, cn } from "@/components/ui";
 import { db } from "@/db";
 import { reviewsForPieces } from "@/db/content-review";
-import { appUsers, contentPieces, contentSuggestions, contracts, deals, demoRequests, followups, tickets } from "@/db/schema";
+import { appUsers, contacts, contentPieces, contentSuggestions, contracts, deals, demoRequests, followups, tickets } from "@/db/schema";
 import { contractAlerts, staleDeals } from "@/domain/sales";
 import { todayISO } from "@/lib/format";
 import { can, CONTENT_REVIEWER_ROLES } from "@/lib/permissions";
@@ -33,6 +33,15 @@ export async function MyDay({ access }: { access: SessionAccess }) {
       db.select({ n: count() }).from(followups).where(and(eq(followups.status, "pending"), eq(followups.ownerId, user.id), lte(followups.dueOn, new Date(now.getTime() - 86400000).toISOString().slice(0, 10)))),
     ]);
     items.push({ label: "Mis seguimientos de hoy", n: due.n, href: "/followups", urgent: late.n > 0 });
+  }
+
+  if (can(access, "leads.view")) {
+    const mine = and(eq(contacts.ownerId, user.id), isNotNull(contacts.leadStatus), notInArray(contacts.leadStatus, ["pago", "perdido"]));
+    const [[due], [late]] = await Promise.all([
+      db.select({ n: count() }).from(contacts).where(and(mine, lte(contacts.nextActionOn, today))),
+      db.select({ n: count() }).from(contacts).where(and(mine, lt(contacts.nextActionOn, today))),
+    ]);
+    items.push({ label: "Mis leads de hoy", n: due.n, href: "/leads/hoy", urgent: late.n > 0 });
   }
 
   if (has("clinical_director", "sales", "ceo")) {

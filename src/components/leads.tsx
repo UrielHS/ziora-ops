@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightLeft, CalendarClock, Cog, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
-import { addNoteAction, markRepliedAction, moveLead, recordTouchAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
+import { addNoteAction, markRepliedAction, moveLead, postponeAction, recordTouchAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
 import { Avatar, Badge, btn, cn, inputCls } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
 import type { contacts, LeadStatus } from "@/db/schema";
 import type { TimelineItem } from "@/domain/leads";
-import { ActionForm, Submit } from "@/components/ui/form";
+import { ActionForm, Modal, Submit } from "@/components/ui/form";
+import { CopyButton } from "@/components/ui/copy";
 import { fmtDate, fmtDateTime, relative, todayISO } from "@/lib/format";
 import { CITY, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
 
@@ -172,4 +173,68 @@ export function Timeline({ items }: { items: TimelineItem[] }) {
 export function WhatsAppButton({ href, children = "Abrir WhatsApp" }: { href: string | null; children?: React.ReactNode }) {
   if (!href) return <span className={cn(btn("secondary", "sm"), "cursor-not-allowed opacity-50")} title="Sin teléfono válido"><MessageCircle className="h-3.5 w-3.5" /> {children}</span>;
   return <a href={href} target="_blank" rel="noreferrer" className={btn("secondary", "sm")}><MessageCircle className="h-3.5 w-3.5" /> {children}</a>;
+}
+
+/** Fila de "Mi día": todo lo necesario para despachar un lead sin abrir la ficha. */
+export function TodayRow({ c, owner, message, wa }: { c: Lead; owner?: string | null; message: string; wa: string | null }) {
+  const overdue = !!c.nextActionOn && c.nextActionOn < todayISO();
+  return (
+    <div className="flex flex-col gap-3 border-b border-[#EFEDE6] px-5 py-4 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <Link href={`/leads/${c.id}`} className="text-sm font-bold hover:underline">{c.name}</Link>
+        <LeadPriorityBadge priority={c.priority} />
+        <LeadStatusBadge status={c.leadStatus} />
+        {c.jobTitle && <span className="text-xs text-muted">{c.jobTitle}</span>}
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><Avatar name={owner} size={18} />{owner ?? "Sin dueño"}</span>
+      </div>
+      {c.nextAction && (
+        <p className={cn("flex items-center gap-1 text-xs", overdue ? "font-semibold text-danger" : "text-muted")}>
+          <CalendarClock className="h-3.5 w-3.5" />{c.nextAction}{c.nextActionOn && <span>· {fmtDate(c.nextActionOn)}</span>}
+        </p>
+      )}
+      <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+        <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="label">Mensaje sugerido</p>
+            <CopyButton text={message} />
+          </div>
+          <textarea readOnly value={message} rows={3} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            <WhatsAppButton href={wa}>WhatsApp</WhatsAppButton>
+            <ActionForm action={recordTouchAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <input type="hidden" name="channel" value="whatsapp" />
+              <Submit variant="secondary" className="!py-1.5 !text-xs">Ya lo mandé</Submit>
+            </ActionForm>
+            <ActionForm action={recordTouchAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <input type="hidden" name="channel" value="correo" />
+              <Submit variant="ghost" className="!py-1.5 !text-xs"><Mail className="h-3.5 w-3.5" /> Mandé correo</Submit>
+            </ActionForm>
+            <ActionForm action={markRepliedAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
+            </ActionForm>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionForm action={postponeAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <span className="text-[11px] text-muted">Posponer</span>
+              {[1, 3, 7].map((d) => <Submit key={d} variant="ghost" name="days" value={String(d)} className="!px-2.5 !py-1 !text-xs">{d} {d === 1 ? "día" : "días"}</Submit>)}
+            </ActionForm>
+            <Modal title={`Marcar perdido a ${c.name}`} triggerClass={cn(btn("ghost", "sm"), "ml-auto text-danger")} trigger={<>Perdido</>}>
+              <ActionForm action={setLeadStatusAction}>
+                <input type="hidden" name="id" value={c.id} />
+                <input type="hidden" name="status" value="perdido" />
+                <input name="lostReason" required autoFocus placeholder="Motivo: no le interesa, ya usa otra herramienta, sin presupuesto…" className={inputCls} />
+                <Submit variant="danger">Marcar perdido</Submit>
+              </ActionForm>
+            </Modal>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
