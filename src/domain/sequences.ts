@@ -347,6 +347,9 @@ export async function completePendingTouch(db: Dbx, contactId: string, channel: 
     meta: { sequenceId: e.sequenceId, enrollmentId: e.id, step: step.position },
   });
   await advanceStep(db, done, ctx, now);
+  // Solo limpiamos el siguiente paso si sigue siendo el que puso la secuencia; uno escrito a mano se respeta.
+  await db.update(contacts).set({ nextAction: null, nextActionOn: null })
+    .where(and(eq(contacts.id, contactId), eq(contacts.nextAction, touchLabel(done.touches, ctx.steps.length, "whatsapp"))));
   return true;
 }
 

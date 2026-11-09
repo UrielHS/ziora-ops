@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightLeft, CalendarClock, Cog, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
 import { addNoteAction, markRepliedAction, moveLead, postponeAction, recordTouchAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
-import { Avatar, Badge, btn, cn, inputCls } from "@/components/ui";
+import { enrollAction, stopEnrollmentAction } from "@/actions/sequences";
+import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
 import type { contacts, LeadStatus } from "@/db/schema";
 import type { TimelineItem } from "@/domain/leads";
+import type { Cadence } from "@/domain/sequences";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { CopyButton } from "@/components/ui/copy";
 import { fmtDate, fmtDateTime, relative, todayISO } from "@/lib/format";
-import { CITY, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
+import { CITY, ENROLLMENT_STATUS, LEAD_PRIORITY, LEAD_STATUS, SEQUENCE_CHANNEL } from "@/lib/labels";
 
 type Lead = typeof contacts.$inferSelect;
 
@@ -175,15 +177,41 @@ export function WhatsAppButton({ href, children = "Abrir WhatsApp" }: { href: st
   return <a href={href} target="_blank" rel="noreferrer" className={btn("secondary", "sm")}><MessageCircle className="h-3.5 w-3.5" /> {children}</a>;
 }
 
-/** Fila de "Mi día": todo lo necesario para despachar un lead sin abrir la ficha. */
-export function TodayRow({ c, owner, message, wa }: { c: Lead; owner?: string | null; message: string; wa: string | null }) {
+const STOP_REASON: Record<string, string> = {
+  completada: "sin respuesta", sin_canal: "sin canal disponible", tope: "tope de toques", respondio: "respondió", baja: "baja de correo",
+  perdido: "lead perdido", manual: "detenida a mano", demo_agendada: "demo agendada", en_trial: "entró a trial", pago: "pagó", rollback: "rollback",
+};
+
+/** Etiqueta corta de la cadencia: "Toque 2 de 4 · WhatsApp" si hay pendiente, o la secuencia y su siguiente paso. */
+export function CadenceBadge({ cadence }: { cadence?: Cadence }) {
+  if (!cadence) return null;
+  if (cadence.status !== "activa") {
+    const st = ENROLLMENT_STATUS[cadence.status];
+    return <Badge tone={st.tone}>Secuencia {st.label.toLowerCase()}{cadence.stopReason ? ` · ${STOP_REASON[cadence.stopReason] ?? cadence.stopReason}` : ""}</Badge>;
+  }
+  if (cadence.pendingText && cadence.nextChannel) {
+    return <Badge tone="green"><Megaphone className="mr-1 h-3 w-3" />Toque {cadence.touches + 1} de {cadence.total} · {SEQUENCE_CHANNEL[cadence.nextChannel]}</Badge>;
+  }
+  return (
+    <Badge tone="gray">
+      <Megaphone className="mr-1 h-3 w-3" />Secuencia «{cadence.sequenceName}»
+      {cadence.nextChannel ? ` · siguiente: ${SEQUENCE_CHANNEL[cadence.nextChannel]}${cadence.nextRunAt ? ` ${fmtDate(cadence.nextRunAt)}` : ""}` : ""}
+    </Badge>
+  );
+}
+
+/** Fila de "Mi día": todo lo necesario para despachar un lead sin abrir la ficha. Si la secuencia dejó un WhatsApp listo, ese es el mensaje. */
+export function TodayRow({ c, owner, message, wa, cadence }: { c: Lead; owner?: string | null; message: string; wa: string | null; cadence?: Cadence }) {
   const overdue = !!c.nextActionOn && c.nextActionOn < todayISO();
+  const fromSequence = cadence?.status === "activa" && !!cadence.pendingText;
+  const text = fromSequence ? cadence.pendingText! : message;
   return (
     <div className="flex flex-col gap-3 border-b border-[#EFEDE6] px-5 py-4 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/leads/${c.id}`} className="text-sm font-bold hover:underline">{c.name}</Link>
         <LeadPriorityBadge priority={c.priority} />
         <LeadStatusBadge status={c.leadStatus} />
+        <CadenceBadge cadence={cadence} />
         {c.jobTitle && <span className="text-xs text-muted">{c.jobTitle}</span>}
         <span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><Avatar name={owner} size={18} />{owner ?? "Sin dueño"}</span>
       </div>
@@ -195,10 +223,10 @@ export function TodayRow({ c, owner, message, wa }: { c: Lead; owner?: string | 
       <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
         <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="label">Mensaje sugerido</p>
-            <CopyButton text={message} />
+            <p className="label">{fromSequence ? `Mensaje de la secuencia «${cadence.sequenceName}»` : "Mensaje sugerido"}</p>
+            <CopyButton text={text} />
           </div>
-          <textarea readOnly value={message} rows={3} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
+          <textarea readOnly value={text} rows={3} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
@@ -235,6 +263,49 @@ export function TodayRow({ c, owner, message, wa }: { c: Lead; owner?: string | 
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Ficha: estado de la cadencia del lead. Enrolar si no hay una activa; detener si la hay. */
+export function CadencePanel({ contactId, cadence, sequences, canManage }: {
+  contactId: string; cadence?: Cadence; sequences: { id: string; name: string }[]; canManage: boolean;
+}) {
+  const active = cadence?.status === "activa";
+  return (
+    <div className="flex flex-col gap-3">
+      {cadence ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">«{cadence.sequenceName}»</span>
+            <Badge tone={ENROLLMENT_STATUS[cadence.status].tone}>{ENROLLMENT_STATUS[cadence.status].label}</Badge>
+            <span className="text-xs text-muted">{cadence.touches} de {cadence.total} toques</span>
+          </div>
+          {active && cadence.pendingText && cadence.nextChannel && (
+            <p className="text-xs text-muted">Toque {cadence.touches + 1} listo por {SEQUENCE_CHANNEL[cadence.nextChannel]}: mándalo desde Mi día y marca «Ya lo mandé».</p>
+          )}
+          {active && !cadence.pendingText && cadence.nextChannel && (
+            <p className="text-xs text-muted">Siguiente: {SEQUENCE_CHANNEL[cadence.nextChannel]}{cadence.nextRunAt ? ` · ${fmtDateTime(cadence.nextRunAt)}` : ""}</p>
+          )}
+          {!active && cadence.stopReason && <p className="text-xs text-muted">Motivo: {STOP_REASON[cadence.stopReason] ?? cadence.stopReason}</p>}
+        </div>
+      ) : (
+        <p className="text-sm text-muted">Este lead no está en ninguna secuencia.</p>
+      )}
+      {canManage && active && (
+        <ActionForm action={stopEnrollmentAction} className="contents">
+          <input type="hidden" name="id" value={contactId} />
+          <Submit variant="ghost" className="!py-1.5 !text-xs text-danger">Detener secuencia</Submit>
+        </ActionForm>
+      )}
+      {canManage && !active && sequences.length > 0 && (
+        <ActionForm action={enrollAction} className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="ids[]" value={contactId} />
+          <Select name="sequenceId" defaultValue={sequences[0]?.id} className="w-auto py-1.5 text-xs" options={sequences.map((s) => [s.id, s.name] as [string, string])} />
+          <Submit variant="secondary" className="!py-1.5 !text-xs">Enrolar</Submit>
+        </ActionForm>
+      )}
+      {canManage && !active && sequences.length === 0 && <p className="text-xs text-faint">No hay secuencias activas (docs/RUNBOOK-CRM-LEADS.md §7).</p>}
     </div>
   );
 }

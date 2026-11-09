@@ -7,7 +7,7 @@ import { btn, Card, cn, inputCls, PageHeader, Select } from "@/components/ui";
 import { ActionForm, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
-import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
+import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
 import { LEAD_ORDER } from "@/domain/leads";
 import { todayISO } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
@@ -36,7 +36,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   if (sp.etiqueta) where.push(exists(db.select({ x: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, contacts.id), eq(contactTags.tag, sp.etiqueta as (typeof contactTagEnum.enumValues)[number])))));
   if (sp.q) where.push(or(ilike(contacts.name, `%${sp.q}%`), ilike(contacts.email, `%${sp.q}%`), ilike(contacts.company, `%${sp.q}%`))!);
 
-  const [users, rows, [k]] = await Promise.all([
+  const [users, rows, [k], activeSequences] = await Promise.all([
     listUsers(),
     db.select().from(contacts).where(and(...where)).orderBy(sql`${contacts.priority} nulls last`, sql`${contacts.nextActionOn} nulls last`, contacts.updatedAt),
     db.select({
@@ -46,6 +46,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       trial: sql<number>`count(*) filter (where ${contacts.leadStatus} = 'en_trial')::int`,
       pago: sql<number>`count(*) filter (where ${contacts.leadStatus} = 'pago')::int`,
     }).from(contacts).where(isNotNull(contacts.leadStatus)),
+    db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name),
   ]);
   const ownerName = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
   const columns = [
@@ -66,7 +67,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         eyebrow="Ventas"
         title="Leads"
         subtitle="Cada tarjeta es una persona con la que hay que hablar. Arrastra para cambiar de etapa; el motivo de pérdida se captura en la ficha."
-        actions={<Link href="/leads/hoy" className={btn("primary")}>Mi día</Link>}
+        actions={
+          <>
+            <Link href="/leads/secuencias" className={btn("ghost", "sm")}>Secuencias</Link>
+            <Link href="/leads/hoy" className={btn("primary")}>Mi día</Link>
+          </>
+        }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -103,6 +109,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
             <span className="h-5 w-px bg-line" />
             <Select name="priority" placeholder="Sin prioridad" className="w-auto py-1.5 text-xs" options={Object.entries(LEAD_PRIORITY).map(([k, v]) => [k, v.label])} />
             <Submit variant="secondary" name="op" value="priority" className="!py-1.5 !text-xs">Cambiar prioridad</Submit>
+            {activeSequences.length > 0 && (
+              <>
+                <span className="h-5 w-px bg-line" />
+                <Select name="sequenceId" placeholder="Secuencia…" className="w-auto py-1.5 text-xs" options={activeSequences.map((s) => [s.id, s.name] as [string, string])} />
+                <Submit variant="secondary" name="op" value="enroll" className="!py-1.5 !text-xs">Enrolar en secuencia</Submit>
+              </>
+            )}
           </Card>
         )}
         <LeadsBoard

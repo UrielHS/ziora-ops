@@ -150,6 +150,10 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     const e2 = await s.enrollment(a.id);
     expect(e2).toMatchObject({ currentStep: 3, touches: 2, pendingStepId: null, pendingText: null, pendingSince: null });
     expect(e2.nextRunAt!.toISOString()).toBe(s.seqMod.computeNextRunAt(e2.enrolledAt, 7, NOW).toISOString());
+    // El siguiente paso que puso la secuencia se limpia al completarlo; si no, el lead se queda en "Hoy" para siempre.
+    const c2 = await s.contact(a.id);
+    expect(c2.nextAction).toBeNull();
+    expect(c2.nextActionOn).toBeNull();
     expect(await s.seqMod.completePendingTouch(s.db, a.id, "whatsapp", NOW)).toBe(false);
   });
 

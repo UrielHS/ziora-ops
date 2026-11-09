@@ -7,6 +7,7 @@ import { listUsers } from "@/db/queries";
 import { contacts } from "@/db/schema";
 import { defaultMessage } from "@/domain/leads";
 import { waMessageLink } from "@/domain/phone";
+import { loadCadence } from "@/domain/sequences";
 import { todayISO } from "@/lib/format";
 import { requirePagePermission } from "@/lib/session";
 
@@ -26,6 +27,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
   const where: SQL[] = [isNotNull(contacts.leadStatus), notInArray(contacts.leadStatus, ["pago", "perdido"])];
   if (mineOnly) where.push(eq(contacts.ownerId, access.user.id));
   const [users, rows] = await Promise.all([listUsers(), db.select().from(contacts).where(and(...where))]);
+  const cadence = await loadCadence(db, rows.map((r) => r.id));
 
   const prio = (c: typeof rows[number]) => c.priority ?? 9;
   const due = rows.filter((c) => c.nextActionOn && c.nextActionOn <= today).sort((a, b) => a.nextActionOn!.localeCompare(b.nextActionOn!) || prio(a) - prio(b));
@@ -33,8 +35,10 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
   const noPlan = rows.filter((c) => !c.nextActionOn && (WORKING as readonly string[]).includes(c.leadStatus!)).sort((a, b) => prio(a) - prio(b));
   const ownerName = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
   const row = (c: typeof rows[number]) => {
-    const message = defaultMessage(c, access.user.name);
-    return <TodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} message={message} wa={waMessageLink(c.phoneE164, message)} />;
+    const cad = cadence.get(c.id);
+    // Si la secuencia dejó un WhatsApp listo, el enlace de WhatsApp lleva ese texto.
+    const message = cad?.status === "activa" && cad.pendingText ? cad.pendingText : defaultMessage(c, access.user.name);
+    return <TodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} message={message} wa={waMessageLink(c.phoneE164, message)} cadence={cad} />;
   };
 
   return (
@@ -46,6 +50,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
         actions={
           <>
             <Link href={mineOnly ? "/leads/hoy?todos=1" : "/leads/hoy"} className={btn("ghost", "sm")}>{mineOnly ? "Ver los de todos" : "Solo los míos"}</Link>
+            <Link href="/leads/secuencias" className={btn("ghost", "sm")}>Secuencias</Link>
             <Link href="/leads" className={btn("secondary", "sm")}>Kanban</Link>
           </>
         }

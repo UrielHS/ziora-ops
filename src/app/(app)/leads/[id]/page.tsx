@@ -4,13 +4,14 @@ import { eq } from "drizzle-orm";
 import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
 import { convertToAccountAction } from "@/actions/leads";
 import { ActionForm, Submit } from "@/components/ui/form";
-import { LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
+import { CadencePanel, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
-import { accountContacts, accounts, contactConsents, contacts, contactTags } from "@/db/schema";
+import { accountContacts, accounts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
+import { loadCadence } from "@/domain/sequences";
 import { waMessageLink } from "@/domain/phone";
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
@@ -26,17 +27,23 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const canManage = can(access, "leads.manage");
   const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
   if (!c) notFound();
-  const [users, tags, consents, timeline, [account]] = await Promise.all([
+  const [users, tags, consents, timeline, [account], cadenceMap, activeSequences] = await Promise.all([
     listUsers(),
     db.select({ tag: contactTags.tag }).from(contactTags).where(eq(contactTags.contactId, id)),
     db.select().from(contactConsents).where(eq(contactConsents.contactId, id)),
     loadTimeline(db, id),
     db.select({ id: accounts.id, name: accounts.name }).from(accountContacts).innerJoin(accounts, eq(accounts.id, accountContacts.accountId)).where(eq(accountContacts.contactId, id)).limit(1),
+    loadCadence(db, [id]),
+    db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name),
   ]);
+  const cadence = cadenceMap.get(id);
+  // El panel de cadencia se muestra a quien puede entrar en una (nuevo/contactado) o ya pasó por una.
+  const showCadence = c.leadStatus === "nuevo" || c.leadStatus === "contactado" || !!cadence;
   // Solo quien dirige o coordina una clínica se convierte en cuenta B2B; el resto se vende como persona.
   const looksB2B = tags.some((t) => t.tag === "clinic") || /director|coordinador/i.test(c.jobTitle ?? "");
   const owner = users.find((u) => u.id === c.ownerId)?.name ?? null;
-  const message = defaultMessage(c, access.user.name);
+  const fromSequence = cadence?.status === "activa" && !!cadence.pendingText;
+  const message = fromSequence ? cadence.pendingText! : defaultMessage(c, access.user.name);
   const wa = waMessageLink(c.phoneE164, message);
   const city = c.cityName ?? (c.city ? CITY[c.city] : null);
   const profile = ([
@@ -84,6 +91,13 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             </div>
           </Card>
 
+          {showCadence && (
+            <Card>
+              <PanelHeader title="Cadencia" subtitle="Correos automáticos y WhatsApp listos en Mi día. Se detiene sola cuando responde, se pierde o se da de baja." />
+              <div className="px-5 pb-5"><CadencePanel contactId={c.id} cadence={cadence} sequences={activeSequences} canManage={canManage} /></div>
+            </Card>
+          )}
+
           {canManage && (
             <Card>
               <PanelHeader title="Registrar toque" subtitle="Lo que hiciste hoy. El primer toque pasa el lead a Contactado." />
@@ -91,7 +105,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 <TouchButtons id={c.id} />
                 <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="label">Mensaje sugerido</p>
+                    <p className="label">{fromSequence ? `Mensaje de la secuencia «${cadence.sequenceName}»` : "Mensaje sugerido"}</p>
                     <CopyButton text={message} />
                   </div>
                   <textarea readOnly value={message} rows={4} className="mt-2 w-full resize-none bg-transparent text-sm outline-none" />
