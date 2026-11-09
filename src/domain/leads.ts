@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
-import { appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
+import { accountContacts, accounts, appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
 import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
 import { fmtDateTime } from "@/lib/format";
@@ -189,4 +189,22 @@ export function defaultMessage(c: { name: string; leadStatus: LeadStatus | null 
     default:
       return `Hola ${first}, soy ${me} de Ziora. ¿Cómo vas? Cualquier duda o idea, aquí estoy.`;
   }
+}
+
+/**
+ * Un lead que dirige una clínica se vuelve cuenta B2B: crea la cuenta (una sola vez), lo liga como decisor y lo anota en su timeline.
+ * No toca el estado del lead: la venta a la persona y la cuenta de la clínica siguen caminos distintos.
+ */
+export async function convertLeadToAccount(db: Dbx, contactId: string, actor: Actor, opts: { name?: string } = {}): Promise<{ accountId: string; created: boolean }> {
+  return db.transaction(async (tx) => {
+    const [c] = await tx.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
+    if (!c) throw new Error("El contacto no existe.");
+    const [linked] = await tx.select({ accountId: accountContacts.accountId }).from(accountContacts).where(eq(accountContacts.contactId, contactId)).limit(1);
+    if (linked) return { accountId: linked.accountId, created: false };
+    const name = opts.name?.trim() || c.company?.trim() || `Clínica de ${c.name}`;
+    const [acc] = await tx.insert(accounts).values({ name, type: "clinic", city: c.cityName ?? null, ownerId: c.ownerId ?? null }).returning({ id: accounts.id });
+    await tx.insert(accountContacts).values({ accountId: acc.id, contactId, title: c.jobTitle ?? null, decisionMaker: true });
+    await logActivity(tx, { contactId, type: "sistema", actor, summary: `Convertido en cuenta ${name}`, meta: { accountId: acc.id } });
+    return { accountId: acc.id, created: true };
+  });
 }

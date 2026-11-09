@@ -128,4 +128,31 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(items[0]).toMatchObject({ kind: "whatsapp", title: "Hola por WhatsApp", actor: "prueba" });
     expect(items.some((i) => i.kind === "demo" && i.title.includes("Agendada"))).toBe(true);
   });
+
+  it("convertir un lead en cuenta crea la cuenta una sola vez, lo liga como decisor y deja actividad", async () => {
+    const { db } = await import("@/db");
+    const { accountContacts, accounts, contactActivities, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { convertLeadToAccount } = await import("./leads");
+    const t = Date.now();
+    const { id } = await upsertContact(db, {
+      name: "Dir. Prueba", email: `dir${t}@example.com`, source: "manual", tags: ["lead", "clinic"], leadStatus: "respondio",
+      company: `Clínica Prueba ${t}`, jobTitle: "Directora", cityName: "Querétaro",
+    });
+
+    const first = await convertLeadToAccount(db, id, actor);
+    const second = await convertLeadToAccount(db, id, actor);
+    expect(first.created).toBe(true);
+    expect(second).toEqual({ accountId: first.accountId, created: false });
+
+    const [acc] = await db.select().from(accounts).where(eq(accounts.id, first.accountId));
+    expect(acc).toMatchObject({ name: `Clínica Prueba ${t}`, type: "clinic", city: "Querétaro" });
+    const links = await db.select().from(accountContacts).where(eq(accountContacts.contactId, id));
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ accountId: first.accountId, title: "Directora", decisionMaker: true });
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
+    expect(acts.filter((a) => a.type === "sistema" && (a.meta as { accountId?: string }).accountId === first.accountId)).toHaveLength(1);
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.leadStatus).toBe("respondio"); // convertir no cambia el estado del lead
+  });
 });

@@ -1,11 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { leadStatusEnum } from "@/db/schema";
 import {
-  assignOwner, logActivity, markReplied, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
+  assignOwner, convertLeadToAccount, logActivity, markReplied, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
 } from "@/domain/leads";
 import { formAction, type ActionState } from "@/lib/action";
 import { todayISO } from "@/lib/format";
@@ -110,10 +111,12 @@ const _addNote = formAction(z.object({ id, text: z.string().trim().min(1, "escri
   return "Nota guardada";
 });
 
-// Task 12 la vuelve real (convertLeadToAccount en el dominio).
-const _convertToAccount = formAction(z.object({ id }), async () => {
-  await actor();
-  throw new Error("Pendiente");
+/** Convierte al lead en cuenta B2B y lleva a la ficha de la cuenta. Si ya tenía una, va a esa. */
+const _convertToAccount = formAction(z.object({ id, name: z.string().trim().max(200).optional() }), async (d) => {
+  const { accountId } = await convertLeadToAccount(db, d.id, await actor(), { name: d.name });
+  refresh(d.id);
+  revalidatePath("/sales");
+  redirect(`/sales/accounts/${accountId}`);
 });
 
 export async function setLeadStatusAction(prev: ActionState, fd: FormData) { return _setLeadStatus(prev, fd); }

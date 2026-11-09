@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { Mail, MailX, MessageCircle, Phone } from "lucide-react";
+import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
+import { convertToAccountAction } from "@/actions/leads";
+import { ActionForm, Submit } from "@/components/ui/form";
 import { LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
-import { contactConsents, contacts, contactTags } from "@/db/schema";
+import { accountContacts, accounts, contactConsents, contacts, contactTags } from "@/db/schema";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
 import { waMessageLink } from "@/domain/phone";
 import { fmtDate } from "@/lib/format";
@@ -24,12 +26,15 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const canManage = can(access, "leads.manage");
   const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
   if (!c) notFound();
-  const [users, tags, consents, timeline] = await Promise.all([
+  const [users, tags, consents, timeline, [account]] = await Promise.all([
     listUsers(),
     db.select({ tag: contactTags.tag }).from(contactTags).where(eq(contactTags.contactId, id)),
     db.select().from(contactConsents).where(eq(contactConsents.contactId, id)),
     loadTimeline(db, id),
+    db.select({ id: accounts.id, name: accounts.name }).from(accountContacts).innerJoin(accounts, eq(accounts.id, accountContacts.accountId)).where(eq(accountContacts.contactId, id)).limit(1),
   ]);
+  // Solo quien dirige o coordina una clínica se convierte en cuenta B2B; el resto se vende como persona.
+  const looksB2B = tags.some((t) => t.tag === "clinic") || /director|coordinador/i.test(c.jobTitle ?? "");
   const owner = users.find((u) => u.id === c.ownerId)?.name ?? null;
   const message = defaultMessage(c, access.user.name);
   const wa = waMessageLink(c.phoneE164, message);
@@ -50,6 +55,14 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             <Link href="/leads" className={btn("ghost", "sm")}>← Leads</Link>
             {c.email && <a href={`mailto:${c.email}`} className={btn("ghost", "sm")}><Mail className="h-3.5 w-3.5" /> Correo</a>}
             <WhatsAppButton href={wa} />
+            {account ? (
+              <Link href={`/sales/accounts/${account.id}`} className={btn("secondary", "sm")}><Building2 className="h-3.5 w-3.5" /> Ver cuenta: {account.name}</Link>
+            ) : canManage && looksB2B ? (
+              <ActionForm action={convertToAccountAction} className="contents">
+                <input type="hidden" name="id" value={c.id} />
+                <Submit variant="secondary" className="!py-1.5 !text-xs"><Building2 className="h-3.5 w-3.5" /> Convertir en cuenta</Submit>
+              </ActionForm>
+            ) : null}
           </>
         }
       />
