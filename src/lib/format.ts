@@ -1,3 +1,4 @@
+import { normalizePhoneE164 } from "@/domain/phone";
 const TZ = "America/Mexico_City";
 
 export function fmtDate(d: Date | string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }) {
@@ -31,9 +32,9 @@ export function todayISO() {
 }
 
 export function waLink(phone: string | null | undefined, text?: string) {
-  if (!phone) return null;
-  const digits = phone.replace(/\D/g, "");
-  return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+  const e164 = normalizePhoneE164(phone);
+  if (!e164) return null;
+  return `https://wa.me/${e164}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 }
 
 export function pct(n: number, d: number) {
