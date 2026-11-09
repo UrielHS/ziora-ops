@@ -178,6 +178,39 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     expect(activos.map((e) => e.contactId)).not.toContain(pagado.id);
   });
 
+  it("la migración 0014 se puede volver a aplicar sin error (idempotente, como exige el spec)", async () => {
+    const s = await setup();
+    const { readFileSync } = await import("node:fs");
+    const { sql } = await import("drizzle-orm");
+    const stmts = readFileSync("drizzle/0014_cadencia.sql", "utf8").split("--> statement-breakpoint").map((x) => x.trim()).filter(Boolean);
+    expect(stmts.length).toBeGreaterThan(10);
+    for (const st of stmts) await s.db.execute(sql.raw(st));
+  });
+
+  it("tras 3 fallos de envío el paso de correo se omite y la secuencia sigue (no reintenta para siempre)", async () => {
+    const s = await setup();
+    const { seq } = await s.mkSequence();
+    const a = await s.mkLead();
+    await s.seqMod.enroll(s.db, [a.id], seq.id, s.actor, NOW);
+    const failing = async () => { throw new Error("Resend: API key is invalid"); };
+    const hour = 60 * 60 * 1000;
+    const r1 = await s.seqMod.runSequences(s.db, { now: NOW, send: failing });
+    expect(r1).toMatchObject({ sent: 0, failed: 1, skipped: 0 });
+    let e = await s.enrollment(a.id);
+    expect(e.currentStep).toBe(1);
+    expect(e.nextRunAt!.getTime()).toBe(NOW.getTime() + hour);
+    const r2 = await s.seqMod.runSequences(s.db, { now: new Date(NOW.getTime() + hour), send: failing });
+    expect(r2).toMatchObject({ failed: 1, skipped: 0 });
+    const r3 = await s.seqMod.runSequences(s.db, { now: new Date(NOW.getTime() + 2 * hour), send: failing });
+    expect(r3).toMatchObject({ failed: 1, skipped: 1 });
+    e = await s.enrollment(a.id);
+    expect(e.currentStep).toBe(2); // sigue al WhatsApp del día 3
+    expect(e.touches).toBe(0);
+    const acts = await s.activities(a.id);
+    expect(acts.filter((x) => x.summary.startsWith("Paso 1 de correo falló"))).toHaveLength(3);
+    expect(acts.some((x) => x.summary.startsWith("Paso 1 de correo omitido: 3 intentos de envío fallaron"))).toBe(true);
+  });
+
   it("una respuesta detiene la secuencia antes del siguiente paso", async () => {
     const s = await setup();
     const { seq } = await s.mkSequence();
@@ -274,7 +307,7 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     const a = await s.mkLead();
     await s.seqMod.enroll(s.db, [a.id], seq.id, s.actor, NOW);
     const r = await s.run({ now: new Date("2026-11-10T21:00:00-06:00") });
-    expect(r).toEqual({ sent: 0, pendingWhatsapp: 0, skipped: 0, finished: 0, stopped: 0 });
+    expect(r).toEqual({ sent: 0, pendingWhatsapp: 0, skipped: 0, finished: 0, stopped: 0, failed: 0 });
     expect(await s.enrollment(a.id)).toMatchObject({ currentStep: 1, touches: 0 });
   });
 

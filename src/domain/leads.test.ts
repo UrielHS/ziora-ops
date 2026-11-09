@@ -38,3 +38,26 @@ describe("defaultMessage", () => {
     }
   });
 });
+
+describe("todayBuckets (Mi día)", async () => {
+  const { todayBuckets } = await import("./leads");
+  const mk = (id: string, nextActionOn: string | null, leadStatus = "contactado", priority: number | null = 2) =>
+    ({ id, nextActionOn, leadStatus, priority }) as unknown as Parameters<typeof todayBuckets>[0][number];
+  const cad = (id: string, pendingText: string | null, status: "activa" | "terminada" = "activa") =>
+    [id, { enrollmentId: "e", sequenceName: "MTW", status, touches: 1, total: 4, nextRunAt: new Date("2026-11-13T16:00:00Z"), nextChannel: "email" as const, pendingText, stopReason: null }] as const;
+
+  it("un lead en secuencia activa que espera su siguiente paso no cae en 'Sin siguiente paso'", () => {
+    const rows = [mk("a", null), mk("b", null), mk("c", "2026-11-09"), mk("d", null, "nuevo")];
+    const cadence = new Map([cad("a", null), cad("c", "Hola")]);
+    const b = todayBuckets(rows, cadence, "2026-11-09", "2026-11-16");
+    expect(b.due.map((r) => r.id)).toEqual(["c"]);
+    expect(b.noPlan.map((r) => r.id)).toEqual(["b", "d"]);
+    expect(b.inSequence.map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("una secuencia terminada no retira al lead de 'Sin siguiente paso'", () => {
+    const b = todayBuckets([mk("a", null)], new Map([cad("a", null, "terminada")]), "2026-11-09", "2026-11-16");
+    expect(b.noPlan.map((r) => r.id)).toEqual(["a"]);
+    expect(b.inSequence).toEqual([]);
+  });
+});

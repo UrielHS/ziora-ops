@@ -17,9 +17,9 @@ Cadencia para los leads individuales de Mexico Tech Week (panel 26-oct y taller 
 
 | Toque | Día | Canal | Quién lo manda |
 |---|---|---|---|
-| 1 | 0 (el día que se enrola, a las 10:00 CDMX) | Correo | Sistema |
+| 1 | 0 (el día que se enrola, en la siguiente corrida horaria dentro de 08:00–20:00 CDMX) | Correo | Sistema |
 | 2 | 3 | WhatsApp | Dueño del lead, desde «Mi día» |
-| 3 | 7 | Correo | Sistema |
+| 3 | 7 (a las 10:00 CDMX) | Correo | Sistema |
 | 4 | 14 | WhatsApp | Dueño del lead, desde «Mi día» |
 
 Se detiene sola cuando el lead responde, agenda demo, entra a trial, paga, se marca perdido o se da de baja del correo. Si el WhatsApp del toque 2 lleva más de 7 días sin mandarse, se salta y sigue el toque 3.

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { and, eq, isNotNull, notInArray, type SQL } from "drizzle-orm";
-import { TodayRow } from "@/components/leads";
+import { CadenceBadge, LeadPriorityBadge, LeadStatusBadge, TodayRow } from "@/components/leads";
 import { btn, Card, Empty, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
 import { contacts } from "@/db/schema";
-import { defaultMessage } from "@/domain/leads";
+import { defaultMessage, todayBuckets } from "@/domain/leads";
 import { waMessageLink } from "@/domain/phone";
 import { loadCadence } from "@/domain/sequences";
 import { todayISO } from "@/lib/format";
@@ -13,7 +13,6 @@ import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const WORKING = ["nuevo", "contactado", "respondio"] as const;
 
 export default async function LeadsTodayPage({ searchParams }: { searchParams: Promise<{ todos?: string }> }) {
   const access = await requirePagePermission("leads.view");
@@ -29,10 +28,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
   const [users, rows] = await Promise.all([listUsers(), db.select().from(contacts).where(and(...where))]);
   const cadence = await loadCadence(db, rows.map((r) => r.id));
 
-  const prio = (c: typeof rows[number]) => c.priority ?? 9;
-  const due = rows.filter((c) => c.nextActionOn && c.nextActionOn <= today).sort((a, b) => a.nextActionOn!.localeCompare(b.nextActionOn!) || prio(a) - prio(b));
-  const soon = rows.filter((c) => c.nextActionOn && c.nextActionOn > today && c.nextActionOn <= weekEnd).sort((a, b) => a.nextActionOn!.localeCompare(b.nextActionOn!) || prio(a) - prio(b));
-  const noPlan = rows.filter((c) => !c.nextActionOn && (WORKING as readonly string[]).includes(c.leadStatus!)).sort((a, b) => prio(a) - prio(b));
+  const { due, soon, noPlan, inSequence } = todayBuckets(rows, cadence, today, weekEnd);
   const ownerName = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
   const row = (c: typeof rows[number]) => {
     const cad = cadence.get(c.id);
@@ -56,7 +52,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
         }
       />
 
-      {due.length + soon.length + noPlan.length === 0 && (
+      {due.length + soon.length + noPlan.length + inSequence.length === 0 && (
         <Empty title="Nada pendiente" text={mineOnly ? "No tienes leads con siguiente paso para hoy. Toma leads sin dueño en el kanban o revisa los de todos." : "Nadie tiene leads con siguiente paso pendiente."} action={<Link href="/leads" className={btn("primary", "sm")}>Ir al kanban</Link>} />
       )}
 
@@ -76,6 +72,22 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
         <Card>
           <PanelHeader title="Sin siguiente paso" subtitle="Leads en trabajo sin fecha. Ponles una desde la ficha o mándales algo hoy." />
           <div className="mt-2">{noPlan.map(row)}</div>
+        </Card>
+      )}
+      {inSequence.length > 0 && (
+        <Card>
+          <PanelHeader title="En secuencia" subtitle={`${inSequence.length} lead(s) cubiertos por una cadencia: el sistema manda el siguiente correo o te deja el WhatsApp aquí cuando toque.`} />
+          <ul className="mt-2 flex flex-col">
+            {inSequence.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center gap-2 border-b border-[#EFEDE6] px-5 py-2.5 text-sm last:border-b-0">
+                <Link href={`/leads/${c.id}`} className="font-bold hover:underline">{c.name}</Link>
+                <LeadPriorityBadge priority={c.priority} />
+                <LeadStatusBadge status={c.leadStatus} />
+                <CadenceBadge cadence={cadence.get(c.id)} />
+                <span className="ml-auto text-xs text-muted">{ownerName(c.ownerId) ?? "Sin dueño"}</span>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
     </div>

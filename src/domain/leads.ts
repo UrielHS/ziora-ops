@@ -9,6 +9,7 @@ import { users } from "@/db/shared";
 import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
 import { fmtDateTime } from "@/lib/format";
 import { isPaying } from "./app-users";
+import type { Cadence } from "./sequences";
 
 /** Orden del embudo. `perdido` no está: es terminal y solo se pone a mano (o por baja). */
 export const LEAD_ORDER: LeadStatus[] = ["nuevo", "contactado", "respondio", "demo_agendada", "en_trial", "pago"];
@@ -234,4 +235,25 @@ export async function convertLeadToAccount(db: Dbx, contactId: string, actor: Ac
     await logActivity(tx, { contactId, type: "sistema", actor, summary: `Convertido en cuenta ${name}`, meta: { accountId: acc.id } });
     return { accountId: acc.id, created: true };
   });
+}
+
+/** Estados en los que un lead "está en trabajo" y debería tener siguiente paso. */
+export const WORKING_STATUSES = ["nuevo", "contactado", "respondio"] as const;
+
+type TodayLead = { id: string; nextActionOn: string | null; leadStatus: string | null; priority: number | null };
+
+/**
+ * Secciones de "Mi día". Un lead en secuencia activa que espera su siguiente paso (sin WhatsApp pendiente) no es
+ * "sin siguiente paso": la secuencia ya lo tiene; va a `inSequence` para que el dueño sepa que está cubierto.
+ */
+export function todayBuckets<T extends TodayLead>(rows: T[], cadence: Map<string, Cadence>, today: string, weekEnd: string) {
+  const prio = (c: T) => c.priority ?? 9;
+  const byDate = (a: T, b: T) => a.nextActionOn!.localeCompare(b.nextActionOn!) || prio(a) - prio(b);
+  const waiting = (c: T) => { const cad = cadence.get(c.id); return cad?.status === "activa" && !cad.pendingText; };
+  const due = rows.filter((c) => c.nextActionOn && c.nextActionOn <= today).sort(byDate);
+  const soon = rows.filter((c) => c.nextActionOn && c.nextActionOn > today && c.nextActionOn <= weekEnd).sort(byDate);
+  const noDate = rows.filter((c) => !c.nextActionOn && (WORKING_STATUSES as readonly string[]).includes(c.leadStatus ?? ""));
+  const inSequence = noDate.filter(waiting).sort((a, b) => prio(a) - prio(b));
+  const noPlan = noDate.filter((c) => !waiting(c)).sort((a, b) => prio(a) - prio(b));
+  return { due, soon, noPlan, inSequence };
 }

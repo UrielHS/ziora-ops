@@ -98,7 +98,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
               <Field label="Dueño de los leads nuevos">
                 <Select name="ownerId" placeholder="Sin dueño" options={userOptions(users)} />
               </Field>
-              <Field label="Enrolar en secuencia" hint="Solo entran los que quedan en Nuevo o Contactado; el primer correo sale en la siguiente corrida (10:00 CDMX).">
+              <Field label="Enrolar en secuencia" hint="Solo entran los que quedan en Nuevo o Contactado. El primer correo sale en la siguiente corrida horaria (08:00–20:00 CDMX); los demás pasos, a las 10:00 del día que tocan.">
                 <Select name="sequenceId" placeholder="Sin secuencia" options={activeSequences.map((s) => [s.id, s.name] as [string, string])} />
               </Field>
               <Submit>Importar</Submit>

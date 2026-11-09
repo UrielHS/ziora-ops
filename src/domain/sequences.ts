@@ -9,10 +9,8 @@
  */
 import { and, asc, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
-import {
-  contactConsents, contacts, emailTemplates, sequenceEnrollments, sequenceSteps, sequences,
-  type EnrollmentStatus, type SequenceChannel, type SequenceEnrollment, type SequenceStep,
-} from "@/db/schema";
+import { contactActivities, contactConsents, contacts, emailTemplates, sequenceEnrollments, sequenceSteps, sequences,
+  type EnrollmentStatus, type SequenceChannel, type SequenceEnrollment, type SequenceStep, } from "@/db/schema";
 import { users } from "@/db/shared";
 import { sendBatch, type OutgoingEmail } from "@/integrations/resend";
 import { unsubscribeToken } from "@/lib/crypto";
@@ -132,10 +130,12 @@ export function enrollMessage(r: EnrollResult): string {
 // ---------------------------------------------------------------------------
 
 export type Sender = (from: string, emails: OutgoingEmail[]) => Promise<(string | null)[]>;
-export type RunResult = { sent: number; pendingWhatsapp: number; skipped: number; finished: number; stopped: number };
+export type RunResult = { sent: number; pendingWhatsapp: number; skipped: number; finished: number; stopped: number; failed: number };
 
 const HOUR = 60 * 60 * 1000;
 const RETRY_MS = HOUR; // reserva / reintento tras fallo de envío
+/** Tras este número de fallos de envío del mismo paso, se omite el paso (actividad `sistema`) y la secuencia sigue. */
+export const MAX_SEND_FAILURES = 3;
 export const PENDING_MAX_DAYS = 7; // WhatsApp pendiente que nadie marcó: se omite y la secuencia sigue
 export const EMAIL_LIMIT_PER_RUN = 200; // spec §4.10
 
@@ -185,6 +185,17 @@ async function advanceStep(db: Dbx, e: SequenceEnrollment, ctx: Ctx, now: Date):
   return { ...e, currentStep: next.position, nextRunAt, ...clearPending };
 }
 
+/** Cuántas veces falló el envío de este paso de este enrollment (actividades `sistema` con meta.failed). */
+async function countSendFailures(db: Dbx, enrollmentId: string, position: number): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(contactActivities).where(and(
+    eq(contactActivities.type, "sistema"),
+    sql`${contactActivities.meta}->>'enrollmentId' = ${enrollmentId}`,
+    sql`${contactActivities.meta}->>'step' = ${String(position)}`,
+    sql`${contactActivities.meta}->>'failed' = 'true'`,
+  ));
+  return row?.n ?? 0;
+}
+
 async function skipStep(db: Dbx, e: SequenceEnrollment, step: SequenceStep, why: string): Promise<void> {
   await logActivity(db, {
     contactId: e.contactId, type: "sistema", actor: SYSTEM_ACTOR,
@@ -232,8 +243,19 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
         await send(m.from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }] }]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        await logActivity(db, { contactId: e.contactId, type: "sistema", actor: SYSTEM_ACTOR, summary: `Paso ${step.position} de correo falló: ${msg}`.slice(0, 500), meta: { sequenceId: e.sequenceId, enrollmentId: e.id, step: step.position } });
-        await db.update(sequenceEnrollments).set({ nextRunAt: new Date(now.getTime() + RETRY_MS) }).where(eq(sequenceEnrollments.id, e.id));
+        r.failed++;
+        await logActivity(db, { contactId: e.contactId, type: "sistema", actor: SYSTEM_ACTOR, summary: `Paso ${step.position} de correo falló: ${msg}`.slice(0, 500), meta: { sequenceId: e.sequenceId, enrollmentId: e.id, step: step.position, failed: true } });
+        const failures = await countSendFailures(db, e.id, step.position);
+        if (failures < MAX_SEND_FAILURES) {
+          await db.update(sequenceEnrollments).set({ nextRunAt: new Date(now.getTime() + RETRY_MS) }).where(eq(sequenceEnrollments.id, e.id));
+          return;
+        }
+        // Fallo permanente (llave, remitente, destinatario rechazado): no reintentar para siempre; se omite y sigue.
+        await skipStep(db, e, step, `${MAX_SEND_FAILURES} intentos de envío fallaron`);
+        r.skipped++;
+        e = await advanceStep(db, e, ctx, now);
+        if (!e) { r.finished++; return; }
+        if (e.nextRunAt && e.nextRunAt.getTime() <= now.getTime()) continue;
         return;
       }
       budget.emails--;
@@ -271,7 +293,7 @@ export async function runSequences(db: Db, opts: { now?: Date; limit?: number; s
   const now = opts.now ?? new Date();
   const limit = opts.limit ?? EMAIL_LIMIT_PER_RUN;
   const send = opts.send ?? sendBatch;
-  const r: RunResult = { sent: 0, pendingWhatsapp: 0, skipped: 0, finished: 0, stopped: 0 };
+  const r: RunResult = { sent: 0, pendingWhatsapp: 0, skipped: 0, finished: 0, stopped: 0, failed: 0 };
   if (!inSendingWindow(now)) return r;
   const budget = { emails: EMAIL_LIMIT_PER_RUN };
 

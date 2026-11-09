@@ -129,7 +129,7 @@ necesario para que la app anterior funcione.
 ## 7. Fase 2 · Cadencia (secuencias de correo + WhatsApp)
 
 Qué es: una secuencia es una lista de pasos con día y canal (la semilla «MTW 4 toques» va D0 correo, D3 WhatsApp, D7 correo,
-D14 WhatsApp). Los correos los manda el sistema (Resend) a las 10:00 CDMX del día que toca; los WhatsApp **no se mandan solos**:
+D14 WhatsApp). Los correos los manda el sistema (Resend): el del día 0 en la siguiente corrida horaria tras enrolar y los demás a las 10:00 CDMX del día que toca; los WhatsApp **no se mandan solos**:
 aparecen en `/leads/hoy` del dueño como «Toque N de 4 · WhatsApp» con el texto listo, y «Ya lo mandé» completa el paso.
 Se detiene sola al responder, agendar demo, entrar a trial, pagar, marcar perdido o darse de baja. Textos y reglas:
 `docs/secuencia-mtw.md`.
@@ -149,12 +149,15 @@ Se detiene sola al responder, agendar demo, entrar a trial, pagar, marcar perdid
    gcloud scheduler jobs create http ziora-ops-run-sequences --location $R --project $P      --schedule "0 8-19 * * *" --time-zone "America/Mexico_City" --http-method POST      --uri "$URL/api/jobs/run-sequences"      --headers "Authorization=Bearer $(gcloud secrets versions access latest --secret=ziora-ops-job-secret --project $P)"
    ```
    Corre cada hora de 08:00 a 19:00 CDMX; fuera de la ventana 08:00–20:00 el job responde `skippedWindow` y no hace nada.
-   El paso de cada día se programa a las 10:00, así que la corrida de las 10 es la que manda.
+   El paso del día 0 vence al enrolar (sale en la siguiente corrida horaria); los de los días 3, 7 y 14 se programan a las 10:00,
+   así que esos salen en la corrida de las 10.
 4. **Enrolar por tandas.** Desde `/leads` → «Ver todos» → filtrar (p. ej. COLD sin dueño) → seleccionar **10 leads** →
-   «Enrolar en secuencia». Esperar la corrida de las 10:00 del día siguiente (o lanzarla a mano, §7.2), revisar en Resend que
+   «Enrolar en secuencia». Esperar la siguiente corrida horaria (o lanzarla a mano, §7.2), revisar en Resend que
    salieron los 10 correos y que `/leads/secuencias` cuenta 10 activos y 10 correos enviados. Si todo cuadra, el resto por
    tandas de 50. También se puede enrolar al importar la hoja (select «Enrolar en secuencia» en Contactos) y desde la ficha.
-   Solo entran leads en **Nuevo** o **Contactado** con correo y consentimiento; los demás se omiten y el mensaje lo dice.
+   Solo entran leads en **Nuevo** o **Contactado** (los demás se omiten y el mensaje lo dice). Enrolar no revisa canales: a quien
+   no tenga correo o permiso se le omite el paso de correo con una actividad `sistema` y se le programa el WhatsApp; sin ningún
+   canal termina `sin_canal`. Conviene filtrar antes por consentimiento (Contactos) para no enrolar a quien no se le puede escribir.
 
 ### 7.2 Verificación
 
