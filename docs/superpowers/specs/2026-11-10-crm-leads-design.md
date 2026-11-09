@@ -115,7 +115,7 @@ Orden: nuevo < contactado < respondio < demo_agendada < en_trial < pago. `perdid
 - **`phone_e164` en datos existentes (fase 0):** la migración calcula el valor para todos; si dos contactos normalizan al mismo número, el más antiguo lo conserva y los demás quedan con `phone_e164 = null` y una nota `details.telefono_duplicado_de = <id>`. El índice único parcial se crea después de ese paso. Un script `dev/duplicados-telefono.ts` lista los casos para que Uriel los fusione a mano.
 - **Sin enums nuevos para MTW:** el origen sigue siendo `sheet_import`; la pertenencia a Mexico Tech Week va en `segment` y `details.eventos`. No se agregan valores a `contact_source` ni a `contact_tag`.
 - **Cruce con la app solo por correo en esta entrega.** El snapshot de ziora-api no trae teléfono; agregarlo es un cambio en ziora-gcp que se hace junto con la fase 4. Un lead solo con teléfono avanza a `en_trial`/`pago` a mano hasta entonces.
-- **Roles del equipo y permisos:** Chris = admin/ceo, Uriel = operations + dev_qa, Eurídice = sales, Rafa = clinical_director, Ale = marketing, Paulina = operations. `leads.manage` incluye también a `marketing` (Ale es dueña de los COLD). Antes de desplegar la fase 0, el runbook verifica en producción que las seis personas tienen fila en `ops.member_roles`; quien falte se agrega desde Ajustes → Equipo antes del deploy, porque el cierre de acceso saca a quien no tenga rol. Webhooks y jobs no pasan por `requireAccess` (usan HMAC o Bearer) y no se ven afectados.
+- **Roles del equipo y permisos:** Chris = admin/ceo, Uriel = operations + dev_qa, Eurídice = sales, Rafa = clinical_director, Ale = marketing, Paulina = operations. **Decisión de Chris (10-nov-2026):** la entrada la decide el dominio del correo (solo `@ziora-copilot.com`, además de estar activo en `public.users`); los roles deciden qué ve cada quien y sin rol se entra igual con un aviso. Pau y Ale no hacen ventas: no son dueñas de leads aunque `leads.manage` incluya sus roles. Webhooks y jobs no pasan por `requireAccess` (usan HMAC o Bearer) y no se ven afectados.
 - **Qué es un toque:** una actividad saliente registrada: correo enviado por la secuencia o a mano, WhatsApp marcado "ya lo mandé", llamada o reunión. "Posponer" no es toque. `max_touches` cuenta pasos de la secuencia ejecutados, no campañas masivas. Un paso de correo con el correo rebotado o ausente se salta y se registra como `sistema`; un paso de WhatsApp sin teléfono igual. Si todos los pasos se saltan, la secuencia termina con motivo `sin_canal`.
 - **Baja por cualquier canal:** revoca el consentimiento de ese canal, detiene toda la secuencia activa y marca `perdido` con motivo `baja`. Reabrir es manual y queda en el timeline.
 - **API v1:** no hay middleware de sesión en el repo; las rutas `/api/v1/*` solo aceptan Bearer token. Límite de 60 peticiones por minuto por token (contador en memoria, suficiente para un solo Cloud Run) y el job de cadencia manda como máximo 200 correos por corrida para respetar la cuota de Resend.
@@ -127,8 +127,8 @@ Orden: nuevo < contactado < respondio < demo_agendada < en_trial < pago. `perdid
 | HOT + WARM-A | 5 | Rafa (WhatsApp personal, nota de voz) | día 0 |
 | WARM-B + WARM-C | 20 | Uriel (WhatsApp + correo) | día 0–1 |
 | Directores de clínica | 9 | Eurídice (llamada; convertir en cuenta) | esta semana |
-| COLD presencial | 75 | Ale (secuencia correo; WhatsApp solo a quien responde) | día 0 |
-| COLD virtual | 36 | Ale (secuencia correo) | día 0 |
+| COLD presencial | 75 | Por definir (Uriel o Eurídice); mientras, sin dueño: cadencia de correo (fase 2) y WhatsApp solo a quien responde | día 0 |
+| COLD virtual | 36 | Por definir (Uriel o Eurídice); mientras, sin dueño: cadencia de correo (fase 2) | día 0 |
 
 Viernes: Uriel lee del card de /metrics los 4 números del embudo para el tablero.
 

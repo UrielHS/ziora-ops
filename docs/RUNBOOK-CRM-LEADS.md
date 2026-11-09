@@ -16,10 +16,13 @@ Las dos fases van en la misma rama (`feat/crm-leads`); se pueden desplegar junta
 
 ---
 
-## 1. Antes de desplegar: roles en producción
+## 1. Antes de desplegar: quién entra y con qué rol
 
-El CRM se ve y se opera por rol. Quien entra a Event Ops pero no tiene rol en Ziora Ops verá la pantalla "Tu cuenta no tiene rol".
-Revisar en producción (vía cloud-sql-proxy, ver §2):
+**Entra solo el equipo:** la cuenta de Google debe ser `@ziora-copilot.com` (decisión de Chris, 10-nov-2026) **y** estar activa en
+`public.users`, la lista de Event Ops. Cualquier otro correo ve "Tu cuenta no está autorizada", aunque esté en Event Ops.
+Los roles ya no deciden la entrada: deciden qué ve cada quien. Quien entra sin rol ve el aviso para pedir uno en Ajustes → Equipo.
+
+Revisar en producción (vía cloud-sql-proxy, ver §2) que las cuentas del equipo existan con ese dominio y qué rol tienen:
 
 ```sql
 select u.email, u.active, r.role
@@ -37,8 +40,10 @@ Asignar lo que falte desde **Ajustes → Equipo** (o insertando en `ops.member_r
 | Uriel | `operations`, `dev_qa` | ver y gestionar leads, importar |
 | Eurídice | `sales` | ver y gestionar leads, importar, convertir en cuenta |
 | Rafa | `clinical_director` | ver y gestionar leads |
-| Ale | `marketing` | ver y gestionar leads, importar, enviar campañas |
-| Paulina | `operations` | ver y gestionar leads, importar |
+| Ale | `marketing` | campañas y contenido; **no lleva leads** (puede verlos) |
+| Paulina | `operations` | operación; **no lleva leads** (puede verlos) |
+
+Pau y Ale no hacen ventas (Chris, 10-nov): no se les asignan leads aunque su rol técnicamente se lo permita.
 
 Permisos exactos: `src/lib/permissions.ts`.
 
@@ -83,7 +88,7 @@ export DATABASE_URL="postgres://ziora_ops:<contraseña>@localhost:5439/eventops"
    | HOT + WARM-A | Rafa |
    | WARM-B + WARM-C | Uriel |
    | Directores de clínica (etiqueta Clínica / flag B2B) | Eurídice |
-   | COLD presencial y COLD virtual | Ale |
+   | COLD presencial y COLD virtual (~111) | **Por definir** entre Uriel y Eurídice. Mientras tanto quedan sin dueño: los trabaja la cadencia de correo de la fase 2 y quien responda se toma desde el kanban. |
 
 5. Cada dueño abre **`/leads/hoy`** y trabaja su lista: mensaje sugerido (copiar o abrir WhatsApp), "Ya lo mandé",
    "Respondió", posponer, perdido con motivo. El primer toque pasa el lead a Contactado solo.
