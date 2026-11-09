@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { memberRoles } from "@/db/schema";
 import { users } from "@/db/shared";
+import { isAllowedEmail } from "@/lib/access";
 import { can, type Access, type Permission } from "@/lib/permissions";
 
 export type SessionUser = typeof users.$inferSelect;
@@ -20,6 +21,8 @@ export const requireUser = cache(async (): Promise<SessionUser> => {
   const session = await auth();
   const email = session?.user?.email?.toLowerCase() ?? devLoginEmail();
   if (!email) redirect("/login");
+  // Segunda barrera además del signIn de Google: una sesión vieja de un correo ajeno tampoco pasa.
+  if (!isAllowedEmail(email)) redirect("/login?error=AccessDenied");
   const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (!user || !user.active) redirect("/login?error=AccessDenied");
   return user;
@@ -29,7 +32,11 @@ export const requireUser = cache(async (): Promise<SessionUser> => {
 export const requireAccess = cache(async (): Promise<SessionAccess> => {
   const user = await requireUser();
   const rows = await db.select({ role: memberRoles.role }).from(memberRoles).where(eq(memberRoles.userId, user.id));
-  return { user, isAdmin: user.role === "admin", roles: rows.map((r) => r.role) };
+  const isAdmin = user.role === "admin";
+  const roles = rows.map((r) => r.role);
+  // La entrada la decide el dominio del correo (isAllowedEmail). Los roles solo deciden qué ve y qué puede hacer;
+  // sin rol se entra igual y el layout muestra el aviso para pedir uno.
+  return { user, isAdmin, roles };
 });
 
 /** Para server actions: falla con un mensaje claro si la persona no tiene el permiso. */

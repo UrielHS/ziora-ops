@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { Webhook } from "svix";
 import { db } from "@/db";
 import { campaignSends } from "@/db/schema";
-import { optOutByEmail } from "@/domain/contacts";
+import { emailBounced, optOutByEmail } from "@/domain/contacts";
 import { requireEnv } from "@/lib/env";
 
 // Resend → Webhooks → endpoint <APP_URL>/api/webhooks/resend, eventos email.*
@@ -32,9 +32,8 @@ export async function POST(req: Request) {
   if (status) {
     await db.update(campaignSends).set({ status }).where(eq(campaignSends.providerMessageId, evt.data.email_id));
   }
-  // Rebote duro o queja de spam: se da de baja para no volver a escribirle.
-  if ((status === "bounced" || status === "complained") && evt.data.to?.[0]) {
-    await optOutByEmail(db, evt.data.to[0]);
-  }
+  // Queja de spam: baja (el lead en trabajo pasa a perdido). Rebote duro: solo se quita el permiso de correo; el lead sigue.
+  if (status === "complained" && evt.data.to?.[0]) await optOutByEmail(db, evt.data.to[0]);
+  if (status === "bounced" && evt.data.to?.[0]) await emailBounced(db, evt.data.to[0]);
   return NextResponse.json({ ok: true });
 }

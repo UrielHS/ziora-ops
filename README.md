@@ -1,7 +1,8 @@
 # Ziora Ops
 
 Herramienta interna para operar Ziora: tareas tipo Jira, pipeline de demos, QA y bugs, PRs de GitHub,
-correo masivo con plantillas HTML y contactos de psicólogos **compartidos con Event Ops**.
+correo masivo con plantillas HTML, CRM de leads (embudo, dueño, siguiente paso, timeline) y contactos de psicólogos
+(propios de Ziora Ops, importables desde Event Ops).
 
 ## Cómo se conecta con Event Ops
 
@@ -23,7 +24,7 @@ Integraciones: Resend (correo) y Octokit (GitHub).
 
 | Ruta | Para qué | Autenticación |
 |---|---|---|
-| `POST /api/webhooks/demo` | Solicitudes de ziora-copilot.com/demo → demo y contacto compartido | HMAC `X-Ziora-Signature` |
+| `POST /api/webhooks/demo` | Solicitudes de ziora-copilot.com/demo → demo, contacto y avance del lead | HMAC `X-Ziora-Signature` |
 | `POST /api/webhooks/github` | PRs y reviews en tiempo real | HMAC de GitHub |
 | `POST /api/webhooks/resend` | Entregas, aperturas, rebotes y quejas | Firma Svix |
 | `GET/POST /api/unsubscribe?t=` | Baja de correos (un clic, RFC 8058) | Token HMAC |
@@ -65,10 +66,11 @@ en producción se ignora y el login es con Google.
 | Anuncios | Gasto, CPL y costo real por demo y por cliente (UTM) |
 | Tickets | Cambios e ideas como historia de usuario, con impacto, esfuerzo y viabilidad |
 | Tareas | Tablero con arrastrar y soltar, lista, filtros por sprint/épica/persona, sprints, bloqueos |
+| Leads | Embudo fijo (nuevo → contactado → respondió → demo → trial → pagó / perdido) con kanban, filtros, selección múltiple, ficha con timeline y toques, "Mi día" con mensaje de WhatsApp prellenado; avanza solo con demos y usuarios de la app; convertir director en cuenta B2B |
 | Demos | Pipeline arrastrable, embudo, registro manual, WhatsApp, trial día X/14, tarea de seguimiento |
-| Contactos | Base compartida con Event Ops, filtros, etiquetas, permiso de correo con evidencia |
+| Contactos | Base propia (`ops.contacts`), importación desde Event Ops y desde la hoja de leads (CSV, con teléfono), filtros, etiquetas, permiso por canal con evidencia |
 | Contenido | Calendario mensual, mezcla 60/25/15, cadencia semanal, checklist legal obligatoria para aprobar |
-| Campañas | Segmentos sobre la base compartida, destinatarios con opt-in, vista previa, envío y resultados |
+| Campañas | Segmentos sobre los contactos, destinatarios con opt-in, vista previa, envío y resultados |
 | Plantillas | Editor HTML con variables y vista previa en vivo (escritorio/móvil); exige enlace de baja |
 | Eventos | Lectura de eventos de Event Ops e "Invitar por correo" |
 | QA y bugs | Severidad, estado en línea, detalle, crear tarea desde bug, intake por API |
@@ -85,6 +87,7 @@ Un admin de Event Ops puede todo.
 ## Guías
 
 - `docs/SETUP-CONEXION.md`: base compartida, login, correo, GitHub y calendario de demos.
+- `docs/RUNBOOK-CRM-LEADS.md`: llevar el CRM de leads a producción (roles, migraciones 0012/0013, importación MTW, reparto de dueños, verificación, rollback).
 - `docs/PUENTE-ZIORA-APP.md`: usuarios y "Ayuda y sugerencias" desde Firebase (con la función de referencia en `docs/firebase/`).
 - `docs/REDES-Y-ANUNCIOS.md`: Meta, importación CSV de TikTok/LinkedIn y atribución por UTM.
 

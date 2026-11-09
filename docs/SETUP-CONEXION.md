@@ -9,11 +9,12 @@ Cloud SQL  event-ops-db / base eventops
 └── schema ops      ← dueño: Ziora Ops   (tasks, demo_requests, bugs, pull_requests, campaigns…)
 
 Event Ops  (Cloud Run event-ops)  usuario BD: eventops   → todo public; lee ops (opcional)
-Ziora Ops  (Cloud Run ziora-ops)  usuario BD: ziora_ops  → lee public, escribe contacts/contact_tags, dueño de ops
+Ziora Ops  (Cloud Run ziora-ops)  usuario BD: ziora_ops  → lee public (users, events, contacts), dueño de ops
 ```
 
-Un contacto creado en cualquiera de los dos sistemas aparece en el otro al instante, sin sincronización:
-es la misma fila. Las dos apps usan el mismo login de Google y la misma lista de `users`.
+Los contactos **ya no son compartidos**: Ziora Ops tiene los suyos en `ops.contacts` (con estado de lead, dueño,
+teléfono normalizado y timeline) y copia los de Event Ops cuando alguien lo pide desde Contactos → Importar de Event Ops
+(`event_ops_contact_id` guarda el origen). Las dos apps sí usan el mismo login de Google y la misma lista de `users`.
 
 **Quién corre qué:** los pasos con IAM (1, 4 y 5) requieren permisos de dueño del proyecto, así que
 los corre Chris. El resto lo puede hacer cualquiera que tenga `gcloud` autenticado con acceso al proyecto.
@@ -195,8 +196,9 @@ gcloud scheduler jobs create http ziora-ops-sync-github --location $R --project 
 ## 10. Demos desde el Google Calendar del CEO
 
 Las demos de ziora-copilot.com/demo se agendan directo en el calendario del CEO. Ziora Ops lee ese calendario
-cada 10 minutos y refleja cada demo en el pipeline: la crea (y crea o completa el contacto compartido con Event Ops,
-con etiquetas `psychologist` y `lead`), la reagenda si cambió la hora y la marca como perdida si se canceló.
+cada 10 minutos y refleja cada demo en el pipeline: la crea (y crea o completa el contacto en `ops.contacts`,
+con etiquetas `psychologist` y `lead`, y pasa el lead a **Demo agendada**), la reagenda si cambió la hora y la marca como
+perdida si se canceló (el lead no retrocede; queda en su historial).
 
 Solo se leen eventos que contengan `DEMO_EVENT_MATCH` (por defecto "Demo") y que tengan un invitado externo.
 El resto de la agenda del CEO no se lee ni se guarda. El permiso pedido es de solo lectura (`calendar.events.readonly`).

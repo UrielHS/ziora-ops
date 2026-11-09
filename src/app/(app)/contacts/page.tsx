@@ -5,10 +5,12 @@ import { createContact, importLeadsCsv, setConsent, updateContact } from "@/acti
 import { Avatar, Badge, btn, Card, cn, Field, inputCls, PageHeader, Select } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
+import { listUsers, userOptions } from "@/db/queries";
 import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const PAGE = 40;
@@ -31,6 +33,7 @@ function TagPicker({ selected = [] }: { selected?: string[] }) {
 }
 
 export default async function ContactsPage({ searchParams }: { searchParams: Promise<SP> }) {
+  await requirePagePermission("leads.view");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page ?? 1));
   const where: SQL[] = [];
@@ -46,6 +49,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
     .from(contacts)
     .leftJoin(contactConsents, and(eq(contactConsents.contactId, contacts.id), eq(contactConsents.channel, "email")))
     .where(and(...where));
+  const users = await listUsers();
   const [rows, [{ total }], [stats]] = await Promise.all([
     base.orderBy(desc(contacts.updatedAt)).limit(PAGE).offset((page - 1) * PAGE),
     db.select({ total: count() }).from(contacts).leftJoin(contactConsents, and(eq(contactConsents.contactId, contacts.id), eq(contactConsents.channel, "email"))).where(and(...where)),
@@ -81,11 +85,18 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           <Modal trigger="Importar hoja de leads" triggerClass={btn("secondary")} title="Importar hoja de leads (CSV)">
             <ActionForm action={importLeadsCsv}>
               <p className="text-sm text-muted">
-                Descarga la pestaña de la hoja como CSV (Archivo → Descargar → .csv) y súbela tal cual. Se toman las columnas
-                Nombre, Email, Teléfono, Rol, Pacientes/sem, Enfoque, Documentación, Usa IA y Ciudad; las demás se ignoran.
+                Descarga la pestaña de la hoja como CSV (Archivo → Descargar → .csv) y súbela tal cual. Se toman Prioridad, Segmento, Flag B2B,
+                Nombre, Email, Teléfono, Rol, Pacientes/sem, Enfoque, Documentación, Usa IA, Ciudad y asistencia; las demás se ignoran.
+                Basta con correo o teléfono.
               </p>
-              <p className="text-xs text-faint">Si el correo ya existe, solo se completan los datos que falten. Nada de esto pasa a Event Ops.</p>
+              <p className="text-xs text-faint">Si el contacto ya existe (mismo correo o teléfono), solo se completan los datos que falten. Nada de esto pasa a Event Ops.</p>
               <Field label="Archivo CSV"><input type="file" name="file" accept=".csv,text/csv" required className="text-sm" /></Field>
+              <Field label="Base de consentimiento" hint="Con qué permiso los contactamos. Sin base no entran a campañas ni cadencias.">
+                <Select name="consentSource" placeholder="Sin base de consentimiento" options={[["evento_luma", "Registro en Luma (Mexico Tech Week)"]]} />
+              </Field>
+              <Field label="Dueño de los leads nuevos">
+                <Select name="ownerId" placeholder="Sin dueño" options={userOptions(users)} />
+              </Field>
               <Submit>Importar</Submit>
             </ActionForm>
           </Modal>
@@ -182,6 +193,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
                   {c.email && <a href={`mailto:${c.email}`} className={btn("ghost", "sm")}><Mail className="h-3.5 w-3.5" />{c.email}</a>}
                   {c.phone && <span className={btn("ghost", "sm")}><Phone className="h-3.5 w-3.5" />{c.phone}</span>}
                   {c.eventOpsContactId && <a href={`${eventOps}/contacts/${c.eventOpsContactId}`} target="_blank" className={btn("secondary", "sm")}><Link2 className="h-3.5 w-3.5" />Ver origen en Event Ops</a>}
+                  {c.leadStatus && <Link href={`/leads/${c.id}`} className={btn("primary", "sm")}>Ver ficha de lead</Link>}
                 </div>
                 {(c.jobTitle || c.patientsPerWeek || c.approach || c.documentation || c.aiUsage) && (
                   <div className="rounded-2xl border border-line bg-white p-4">

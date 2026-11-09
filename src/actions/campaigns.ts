@@ -8,7 +8,7 @@ import { db } from "@/db";
 import { campaigns, emailTemplates, cityEnum, contactSourceEnum, contactTagEnum } from "@/db/schema";
 import { sendCampaign } from "@/domain/campaigns";
 import { formAction, type ActionState } from "@/lib/action";
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 
 const _createCampaign = formAction(
   z.object({
@@ -22,7 +22,7 @@ const _createCampaign = formAction(
     scheduledAt: z.string().optional(),
   }),
   async (d) => {
-    const user = await requireUser();
+    const { user } = await requirePermission("content.manage");
     const [c] = await db.insert(campaigns).values({
       name: d.name, templateId: d.templateId, subject: d.subject ?? null, eventId: d.eventId ?? null, createdBy: user.id,
       segment: { tags: d.tags, cities: d.cities, sources: d.sources, ...(d.eventId ? { eventId: d.eventId } : {}) },
@@ -35,7 +35,7 @@ const _createCampaign = formAction(
 );
 
 export async function sendCampaignNow(_prev: ActionState, fd: FormData): Promise<ActionState> {
-  await requireUser();
+  await requirePermission("campaigns.send");
   const id = z.uuid().parse(fd.get("id"));
   if (!process.env.RESEND_API_KEY) {
     return { error: "Falta RESEND_API_KEY. Configura Resend (Ajustes → Integraciones) para enviar." };
@@ -51,7 +51,7 @@ export async function sendCampaignNow(_prev: ActionState, fd: FormData): Promise
 }
 
 export async function deleteDraftCampaign(fd: FormData) {
-  await requireUser();
+  await requirePermission("content.manage");
   await db.delete(campaigns).where(and(eq(campaigns.id, z.uuid().parse(fd.get("id"))), eq(campaigns.status, "draft")));
   revalidatePath("/campaigns");
   redirect("/campaigns");
@@ -66,7 +66,7 @@ const _saveTemplate = formAction(
     html: z.string().min(20, "la plantilla está vacía").max(200_000),
   }),
   async ({ id, ...d }) => {
-    const user = await requireUser();
+    const { user } = await requirePermission("content.manage");
     if (!d.html.includes("{{{baja}}}")) throw new Error("La plantilla debe incluir el enlace de baja {{{baja}}} (LFPDPPP).");
     if (id) {
       await db.update(emailTemplates).set(d).where(eq(emailTemplates.id, id));

@@ -1,7 +1,7 @@
-import { and, asc, count, eq, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNotNull, lte, ne, notInArray } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
-import { bugs, contentPieces, contentSuggestions, demoRequests, epics, followups, pullRequests, sprints, tasks, tickets } from "@/db/schema";
+import { bugs, contacts, contentPieces, contentSuggestions, demoRequests, epics, followups, pullRequests, sprints, tasks, tickets } from "@/db/schema";
 import { users } from "@/db/shared";
 import { todayISO } from "@/lib/format";
 
@@ -20,7 +20,7 @@ export const activeSprint = cache(async () => {
 });
 
 export const navCounts = cache(async () => {
-  const [[t], [d], [b], [p], [r], [sg], [tk], [fu]] = await Promise.all([
+  const [[t], [d], [b], [p], [r], [sg], [tk], [fu], [ld]] = await Promise.all([
     db.select({ n: count() }).from(tasks).where(and(ne(tasks.status, "done"), ne(tasks.status, "backlog"))),
     db.select({ n: count() }).from(demoRequests).where(inArray(demoRequests.stage, ["requested", "scheduled"])),
     db.select({ n: count() }).from(bugs).where(inArray(bugs.status, ["new", "triaged", "in_progress"])),
@@ -29,8 +29,10 @@ export const navCounts = cache(async () => {
     db.select({ n: count() }).from(contentSuggestions).where(eq(contentSuggestions.status, "new")),
     db.select({ n: count() }).from(tickets).where(eq(tickets.status, "new")),
     db.select({ n: count() }).from(followups).where(and(eq(followups.status, "pending"), lte(followups.dueOn, todayISO()))),
+    // Leads con siguiente paso vencido o para hoy. Sin filtrar por dueño: navCounts no conoce al usuario en sesión.
+    db.select({ n: count() }).from(contacts).where(and(isNotNull(contacts.leadStatus), notInArray(contacts.leadStatus, ["pago", "perdido"]), lte(contacts.nextActionOn, todayISO()))),
   ]);
-  return { tasks: t.n, demos: d.n, bugs: b.n, prs: p.n, reviews: r.n, suggestions: sg.n, tickets: tk.n, followups: fu.n };
+  return { tasks: t.n, demos: d.n, bugs: b.n, prs: p.n, reviews: r.n, suggestions: sg.n, tickets: tk.n, followups: fu.n, leads: ld.n };
 });
 
 export type UserOption = Awaited<ReturnType<typeof listUsers>>[number];

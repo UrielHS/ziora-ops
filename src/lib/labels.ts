@@ -199,3 +199,25 @@ export const FOLLOWUP_REASON: Record<string, string> = {
 };
 
 export const SOCIAL_PLATFORM = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", linkedin: "LinkedIn" } as const;
+
+export const LEAD_STATUS = {
+  nuevo: { label: "Nuevo", tone: "gray" },
+  contactado: { label: "Contactado", tone: "blue" },
+  respondio: { label: "Respondió", tone: "lilac" },
+  demo_agendada: { label: "Demo agendada", tone: "blue" },
+  en_trial: { label: "En trial", tone: "amber" },
+  pago: { label: "Pagó", tone: "green" },
+  perdido: { label: "Perdido", tone: "red" },
+} as const satisfies Record<string, { label: string; tone: Tone }>;
+
+export const LEAD_PRIORITY = {
+  // Prioridad ≠ segmento: la hoja MTW trae P1..P5 (un director COLD es P2 por ser B2B). HOT/WARM/COLD viven en `segment`.
+  1: { label: "Alta", tone: "red" },
+  2: { label: "Media", tone: "amber" },
+  3: { label: "Baja", tone: "gray" },
+} as const satisfies Record<number, { label: string; tone: Tone }>;
+
+export const ACTIVITY_TYPE = {
+  nota: "Nota", whatsapp: "WhatsApp", correo: "Correo", llamada: "Llamada", reunion: "Reunión",
+  cambio_estado: "Cambio de estado", demo: "Demo", campana: "Campaña", secuencia: "Secuencia", sistema: "Sistema",
+} as const;

@@ -24,6 +24,11 @@ export const PERMISSIONS = {
   "revenue.view": ["ceo", "sales", "operations"],
   "analytics.view": ["marketing", "ceo", "operations", "sales"],
   "integrations.manage": ["dev_qa", "operations", "ceo"],
+  // Leads (CRM): todos los ven; los trabajan ventas, dirección, operaciones, clínica y marketing (Ale lleva los COLD).
+  "leads.view": ALL_ROLES,
+  "leads.manage": ["sales", "ceo", "operations", "clinical_director", "marketing"],
+  "contacts.import": ["sales", "ceo", "operations", "marketing"],
+  "campaigns.send": ["marketing", "ceo", "operations"],
 } as const satisfies Record<string, readonly OpsRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

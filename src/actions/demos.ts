@@ -7,8 +7,8 @@ import { db } from "@/db";
 import { demoRequests, demoStageEnum, tasks } from "@/db/schema";
 import { toCity, upsertContact } from "@/domain/contacts";
 import { formAction, type ActionState } from "@/lib/action";
-import { calendarConfig, syncCalendarDemos } from "@/domain/demos";
-import { requireUser } from "@/lib/session";
+import { calendarConfig, leadFromDemoStage, syncCalendarDemos } from "@/domain/demos";
+import { requirePermission } from "@/lib/session";
 
 const dt = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).optional();
 const toDate = (s?: string) => (s ? new Date(`${s}:00-06:00`) : null); // hora de CDMX
@@ -27,7 +27,7 @@ const _createDemo = formAction(
     marketingOptIn: z.literal("on").optional(),
   }),
   async (d) => {
-    await requireUser();
+    await requirePermission("leads.manage");
     const { id: contactId } = await upsertContact(db, {
       name: d.fullName, email: d.email, phone: d.whatsapp, city: toCity(d.city), source: "demo_form",
       tags: ["psychologist", "lead"],
@@ -54,25 +54,29 @@ const _updateDemo = formAction(
     lostReason: z.string().max(300).optional(),
   }),
   async ({ id, ...d }) => {
-    await requireUser();
+    const { user } = await requirePermission("leads.manage");
+    const [cur] = await db.select({ stage: demoRequests.stage, contactId: demoRequests.contactId }).from(demoRequests).where(eq(demoRequests.id, id));
     await db.update(demoRequests).set({
       stage: d.stage, scheduledAt: toDate(d.scheduledAt), ownerId: d.ownerId ?? null, notes: d.notes ?? null,
       lostReason: d.lostReason ?? null, ...(d.stage === "trial" ? { trialStartedAt: new Date() } : {}),
     }).where(eq(demoRequests.id, id));
+    // Misma regla que al arrastrar: el lead sigue a la etapa de la demo.
+    if (cur?.contactId && cur.stage !== d.stage) await leadFromDemoStage(db, cur.contactId, d.stage, { userId: user.id, label: user.name }, id);
     revalidatePath("/", "layout");
   },
 );
 
 export async function moveDemo(id: string, stage: string) {
-  await requireUser();
+  const { user } = await requirePermission("leads.manage");
   const s = z.enum(demoStageEnum.enumValues).parse(stage);
-  const [cur] = await db.select({ trial: demoRequests.trialStartedAt }).from(demoRequests).where(eq(demoRequests.id, id));
+  const [cur] = await db.select({ trial: demoRequests.trialStartedAt, contactId: demoRequests.contactId }).from(demoRequests).where(eq(demoRequests.id, id));
   await db.update(demoRequests).set({ stage: s, ...(s === "trial" && !cur?.trial ? { trialStartedAt: new Date() } : {}) }).where(eq(demoRequests.id, id));
+  if (cur?.contactId) await leadFromDemoStage(db, cur.contactId, s, { userId: user.id, label: user.name }, id);
   revalidatePath("/", "layout");
 }
 
 export async function demoFollowUpTask(fd: FormData) {
-  const user = await requireUser();
+  const { user } = await requirePermission("leads.manage");
   const id = z.uuid().parse(fd.get("id"));
   const [d] = await db.select().from(demoRequests).where(eq(demoRequests.id, id));
   if (!d) return;
@@ -92,7 +96,7 @@ export async function updateDemo(prev: ActionState, fd: FormData) {
 }
 
 export async function syncDemosNow(_prev: ActionState): Promise<ActionState> {
-  await requireUser();
+  await requirePermission("leads.manage");
   if (!calendarConfig().ready) {
     return { error: "Falta configurar GOOGLE_CALENDAR_SUBJECT y GOOGLE_INGEST_SA (ver Ajustes → Integraciones)." };
   }

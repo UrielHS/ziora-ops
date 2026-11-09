@@ -8,7 +8,7 @@ import { contactConsents, cityEnum, contacts, contactSourceEnum, contactTagEnum,
 import { importFromEventOps, optOut, upsertContact } from "@/domain/contacts";
 import { importLeadSheet, parseLeadSheet } from "@/domain/lead-sheet";
 import { formAction, type ActionState } from "@/lib/action";
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 
 const _createContact = formAction(
   z.object({
@@ -23,7 +23,7 @@ const _createContact = formAction(
     evidence: z.string().max(300).optional(),
   }),
   async (d) => {
-    await requireUser();
+    await requirePermission("leads.manage");
     if (d.optIn && !d.evidence) throw new Error("Indica cómo dio su permiso (formulario, evento, mensaje…)");
     const { id } = await upsertContact(db, {
       name: d.name, email: d.email, phone: d.phone, city: d.city ?? null, source: d.source, tags: d.tags,
@@ -47,7 +47,7 @@ const _updateContact = formAction(
     tags: z.array(z.enum(contactTagEnum.enumValues)).default([]),
   }),
   async ({ id, tags, ...d }) => {
-    await requireUser();
+    await requirePermission("leads.manage");
     await db.transaction(async (tx) => {
       await tx.update(contacts).set({
         name: d.name, phone: d.phone ?? null, city: d.city ?? null, notes: d.notes ?? null,
@@ -64,7 +64,7 @@ const _updateContact = formAction(
 const _setConsent = formAction(
   z.object({ contactId: z.uuid(), optIn: z.enum(["yes", "no"]), evidence: z.string().max(300).optional() }),
   async ({ contactId, optIn, evidence }) => {
-    await requireUser();
+    await requirePermission("leads.manage");
     if (optIn === "no") {
       await optOut(db, contactId);
       revalidatePath("/contacts");
@@ -84,7 +84,7 @@ const _setConsent = formAction(
 const _importEventOps = formAction(
   z.object({ ids: z.array(z.uuid()).min(1, "Selecciona al menos un contacto").max(500) }),
   async ({ ids }) => {
-    await requireUser();
+    await requirePermission("contacts.import");
     const r = await importFromEventOps(db, ids);
     revalidatePath("/contacts");
     revalidatePath("/contacts/importar-event-ops");
@@ -95,15 +95,21 @@ const _importEventOps = formAction(
 
 const MAX_CSV = 5 * 1024 * 1024;
 const _importLeads = formAction(
-  z.object({ file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB") }),
-  async ({ file }) => {
-    await requireUser();
+  z.object({
+    file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB"),
+    consentSource: z.enum(["evento_luma"]).optional(),
+    ownerId: z.uuid().optional(),
+  }),
+  async ({ file, consentSource, ownerId }) => {
+    await requirePermission("contacts.import");
     const { rows, skipped } = parseLeadSheet(await file.text());
-    if (!rows.length) throw new Error("No encontré filas con correo válido.");
-    const r = await importLeadSheet(db, rows);
+    if (!rows.length) throw new Error("No encontré filas con correo o teléfono válido.");
+    const r = await importLeadSheet(db, rows, { consentSource: consentSource ?? null, ownerId: ownerId ?? null });
     revalidatePath("/contacts");
+    revalidatePath("/leads", "layout");
+    const soloTel = rows.filter((x) => !x.email).length;
     const skip = skipped.length ? ` · ${skipped.length} filas saltadas (${skipped.slice(0, 3).map((x) => `fila ${x.line}: ${x.reason}`).join("; ")}${skipped.length > 3 ? "…" : ""})` : "";
-    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${skip}.`;
+    return `${r.created} contactos nuevos · ${r.completed} ya existían y se completaron${soloTel ? ` · ${soloTel} solo con teléfono` : ""}${skip}.`;
   },
 );
 
