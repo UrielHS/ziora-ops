@@ -175,8 +175,14 @@ curl -s -X POST "$URL/api/jobs/run-sequences"   -H "Authorization: Bearer $(gclo
   select status, stop_reason, count(*) from ops.sequence_enrollments group by 1,2 order by 1,2;
   select count(*) from ops.contact_activities where type = 'correo' and meta ? 'sequenceId';
   ```
-- Si un correo falla (Resend caído, llave mal), queda una actividad `sistema` «Paso N de correo falló» y se reintenta en una
+- Si un correo falla (relay caído, contraseña mal), queda una actividad `sistema` «Paso N de correo falló» y se reintenta en una
   hora; no se pierde el paso.
+- **Transporte (desde 10-nov-2026):** los correos salen por el relay SMTP de Google Workspace, el mismo que usa la app
+  (`SMTP_HOST=smtp-relay.gmail.com`, `SMTP_PORT=587`, `SMTP_USERNAME`, secreto `SMTP_PASSWORD=ziora-ops-smtp-password`). Sin
+  cuenta ni DNS nuevos. El `From` es el dueño del lead («Nombre de Ziora <dueño@ziora-copilot.com>», Reply-To al dueño) y, sin
+  dueño, `MAIL_FROM`. Resend solo se usa si no hay `SMTP_HOST`; sin Resend no hay webhook de aperturas/rebotes (los rebotes
+  llegan al buzón del dueño). Incidente 10-nov: la primera tanda falló por «Missing environment variable: RESEND_API_KEY»
+  (Resend nunca se configuró); se pausó el scheduler y se cambió a SMTP.
 
 ### 7.3 Rollback
 

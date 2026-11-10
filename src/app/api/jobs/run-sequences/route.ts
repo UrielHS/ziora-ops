@@ -13,6 +13,9 @@ export async function POST(req: Request) {
   if (!isJobAuthorized(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
   const now = new Date();
   if (!inSendingWindow(now)) return NextResponse.json({ ok: true, skippedWindow: true });
-  const result = await runSequences(db, { now, limit: EMAIL_LIMIT_PER_RUN });
+  // ?limit=N: corrida acotada para probar a mano (p. ej. 1 correo); nunca por encima del tope normal.
+  const asked = Number(new URL(req.url).searchParams.get("limit"));
+  const limit = Number.isInteger(asked) && asked > 0 ? Math.min(asked, EMAIL_LIMIT_PER_RUN) : EMAIL_LIMIT_PER_RUN;
+  const result = await runSequences(db, { now, limit });
   return NextResponse.json({ ok: true, ...result });
 }

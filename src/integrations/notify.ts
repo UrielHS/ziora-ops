@@ -1,14 +1,14 @@
-import { resend } from "@/integrations/resend";
+import { mailConfigured, sendOne } from "@/integrations/mail";
 
 /**
  * Aviso interno al equipo (revisiones pendientes, sugerencias decididas…).
- * No es correo de marketing: no lleva baja. Si Resend no está configurado, solo se registra en el log.
+ * No es correo de marketing: no lleva baja. Si el correo no está configurado (SMTP o Resend), solo se registra en el log.
  */
 export async function notifyTeam(to: string[], subject: string, lines: string[], link?: { href: string; label: string }) {
   const recipients = [...new Set(to.filter(Boolean))];
   if (recipients.length === 0) return;
-  if (!process.env.RESEND_API_KEY) {
-    console.info(`[aviso sin enviar: falta RESEND_API_KEY] ${subject} → ${recipients.join(", ")}`);
+  if (!mailConfigured()) {
+    console.info(`[aviso sin enviar: falta SMTP_HOST o RESEND_API_KEY] ${subject} → ${recipients.join(", ")}`);
     return;
   }
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -20,7 +20,7 @@ export async function notifyTeam(to: string[], subject: string, lines: string[],
     `<p style="color:#9CA3AF;font-size:12px">Ziora Ops</p></div>`,
   ].join("");
   try {
-    await resend().emails.send({ from: process.env.MAIL_FROM ?? "Ziora Ops <ops@ziora-copilot.com>", to: recipients, subject, html });
+    await sendOne(process.env.MAIL_FROM ?? "Ziora Ops <ops@ziora-copilot.com>", recipients, subject, html);
   } catch (err) {
     // Un aviso que falla no debe tumbar la acción del usuario.
     console.error("notifyTeam", err);

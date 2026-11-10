@@ -18,7 +18,7 @@ Puesta en marcha completa: **`docs/SETUP-CONEXION.md`**. El cambio que necesita 
 ## Stack
 
 El mismo que Event Ops: Node 22 · Next.js 15 · Drizzle + Postgres 16 · Auth.js v5 · Tailwind 4 · zod · Vitest.
-Integraciones: Resend (correo) y Octokit (GitHub).
+Integraciones: correo por el relay SMTP de Google Workspace (`SMTP_HOST`; Resend queda como alternativa) y Octokit (GitHub).
 
 ## Endpoints
 

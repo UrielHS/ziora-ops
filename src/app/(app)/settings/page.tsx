@@ -35,7 +35,7 @@ export default async function SettingsPage() {
   const integrations = [
     { name: "Base de datos compartida", ok: true, detail: "Cloud SQL event-ops-db · schemas public (Event Ops) y ops (Ziora Ops)" },
     { name: "Login con Google", ok: !!process.env.AUTH_GOOGLE_ID, detail: "Mismo cliente OAuth que Event Ops" },
-    { name: "Resend (correo)", ok: !!process.env.RESEND_API_KEY, detail: process.env.MAIL_FROM ?? "Falta MAIL_FROM", hook: `${app}/api/webhooks/resend` },
+    { name: "Correo saliente", ok: !!(process.env.SMTP_HOST || process.env.RESEND_API_KEY), detail: `${process.env.SMTP_HOST ? `SMTP ${process.env.SMTP_HOST}` : process.env.RESEND_API_KEY ? "Resend" : "Falta SMTP_HOST o RESEND_API_KEY"} · ${process.env.MAIL_FROM ?? "Falta MAIL_FROM"}`, hook: process.env.SMTP_HOST ? undefined : `${app}/api/webhooks/resend` },
     { name: "GitHub", ok: !!process.env.GITHUB_TOKEN, detail: process.env.GITHUB_REPOS || "Falta GITHUB_REPOS", hook: `${app}/api/webhooks/github` },
     {
       name: "Demos desde el calendario del CEO",
@@ -57,8 +57,8 @@ export default async function SettingsPage() {
     { name: "Ayuda y sugerencias de la app", ok: !!process.env.ZIORA_APP_BRIDGE_SECRET, detail: "Trigger opsHelpRequest → tickets; firma X-Ops-Signature", hook: `${app}/api/webhooks/ziora-help` },
     {
       name: "Cadencia de leads",
-      ok: !!(process.env.JOB_SECRET && process.env.RESEND_API_KEY),
-      detail: process.env.JOB_SECRET ? "Cloud Scheduler cada hora de 8 a 20 (CDMX) · correos por Resend, WhatsApp queda en Hoy" : "Falta JOB_SECRET (docs/RUNBOOK-CRM-LEADS.md §7)",
+      ok: !!(process.env.JOB_SECRET && (process.env.SMTP_HOST || process.env.RESEND_API_KEY)),
+      detail: process.env.JOB_SECRET ? "Cloud Scheduler cada hora de 8 a 20 (CDMX) · correos por el relay de Workspace (o Resend), WhatsApp queda en Hoy" : "Falta JOB_SECRET (docs/RUNBOOK-CRM-LEADS.md §7)",
       hook: `${app}/api/jobs/run-sequences`,
     },
   ];

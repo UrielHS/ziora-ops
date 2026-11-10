@@ -2,7 +2,7 @@ import { and, eq, exists, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { campaigns, campaignSends, contactConsents, emailTemplates, contacts, contactTags, type CityValue, type ContactSource, type ContactTag } from "@/db/schema";
 import { eventContacts, events } from "@/db/shared";
-import { sendBatch } from "@/integrations/resend";
+import { sendBatch } from "@/integrations/mail";
 import { unsubscribeToken } from "@/lib/crypto";
 import { requireEnv } from "@/lib/env";
 import { firstName, renderTemplate } from "./template";

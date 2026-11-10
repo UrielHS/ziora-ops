@@ -160,7 +160,15 @@ http://localhost:3001/api/auth/callback/google
 
 Entra quien esté activo en `public.users`. Se da de alta desde Event Ops (Settings → Users).
 
-## 8. Correo masivo con Resend
+## 8. Correo saliente
+
+**Opción usada en prod (10-nov-2026): relay SMTP de Google Workspace**, sin proveedor nuevo. En Cloud Run:
+`SMTP_HOST=smtp-relay.gmail.com`, `SMTP_PORT=587`, `SMTP_USERNAME=<usuario de Workspace>`, secreto `SMTP_PASSWORD`
+(contraseña de aplicación; en Ops es `ziora-ops-smtp-password`, copia de `prod-smtp-password` de ziora-ehr) y `MAIL_FROM`
+con una dirección @ziora-copilot.com. El relay ya está activado en Admin (Apps → Gmail → Enrutamiento → Relay SMTP) y el
+dominio firma DKIM con Google. Lo de abajo (Resend) queda como alternativa si algún día hace falta volumen o webhooks.
+
+### 8.1 Alternativa: correo masivo con Resend
 
 1. Crea la cuenta en resend.com y agrega el dominio **`mail.ziora-copilot.com`** (subdominio). Así,
    si una campaña genera quejas de spam, no se daña la reputación del correo principal del equipo.

@@ -31,6 +31,15 @@ describe("job run-sequences", () => {
     expect(runSequences).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ limit: 200 }));
   });
 
+  it("?limit=N acota los correos de la corrida (para una prueba a mano); nunca por encima de 200", async () => {
+    await POST(new Request("http://x/api/jobs/run-sequences?limit=1", { method: "POST", headers: { authorization: "Bearer s3cret" } }));
+    expect(runSequences).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ limit: 1 }));
+    await POST(new Request("http://x/api/jobs/run-sequences?limit=999", { method: "POST", headers: { authorization: "Bearer s3cret" } }));
+    expect(runSequences).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ limit: 200 }));
+    await POST(new Request("http://x/api/jobs/run-sequences?limit=abc", { method: "POST", headers: { authorization: "Bearer s3cret" } }));
+    expect(runSequences).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ limit: 200 }));
+  });
+
   it("fuera de horario responde ok sin tocar la base", async () => {
     vi.mocked(inSendingWindow).mockReturnValue(false);
     const res = await post({ authorization: "Bearer s3cret" });

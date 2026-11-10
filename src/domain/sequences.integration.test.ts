@@ -111,6 +111,19 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     expect((await s.activities(a.id)).some((x) => x.type === "secuencia" && /Enrolado/.test(x.summary))).toBe(true);
   });
 
+  it("el correo sale a nombre y desde la dirección del dueño del lead; sin dueño, desde MAIL_FROM", async () => {
+    const s = await setup();
+    const { seq } = await s.mkSequence();
+    const a = await s.mkLead();
+    const b = await s.mkLead({ ownerId: null });
+    await s.seqMod.enroll(s.db, [a.id, b.id], seq.id, s.actor, NOW);
+    await s.run();
+    const byTo = (to: string | null) => s.sent.find((x) => x.emails[0].to === to)!;
+    expect(byTo(a.email).from).toBe(`"${s.owner.name} de Ziora" <${s.owner.email}>`);
+    expect(byTo(a.email).emails[0].replyTo).toBe(s.owner.email);
+    expect(byTo(b.email).from).toBe(process.env.MAIL_FROM);
+  });
+
   it("paso de correo: manda con liga de baja, deja toque, pasa a contactado y programa el WhatsApp del día 3 a las 10:00", async () => {
     const s = await setup();
     const { seq } = await s.mkSequence();

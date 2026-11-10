@@ -12,7 +12,7 @@ import type { Db, Dbx } from "@/db";
 import { contactActivities, contactConsents, contacts, emailTemplates, sequenceEnrollments, sequenceSteps, sequences,
   type EnrollmentStatus, type SequenceChannel, type SequenceEnrollment, type SequenceStep, } from "@/db/schema";
 import { users } from "@/db/shared";
-import { sendBatch, type OutgoingEmail } from "@/integrations/resend";
+import { sendBatch, type OutgoingEmail } from "@/integrations/mail";
 import { unsubscribeToken } from "@/lib/crypto";
 import { requireEnv } from "@/lib/env";
 import { logActivity, recordTouch, stopActiveEnrollments, SYSTEM_ACTOR, type Actor } from "./leads";
@@ -241,7 +241,9 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
       const v = { ...vars, baja: unsubscribeUrl };
       const subject = renderTemplate(tpl!.subject, v);
       try {
-        await send(m.from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }], replyTo: ctx.ownerEmail ?? undefined }]);
+        // Desde la persona que conoció al lead (responde mejor que un remitente genérico); el relay de Workspace firma cualquier @ziora-copilot.com.
+        const from = ctx.ownerName && ctx.ownerEmail ? `"${ctx.ownerName.replace(/"/g, "")} de Ziora" <${ctx.ownerEmail}>` : m.from;
+        await send(from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }], replyTo: ctx.ownerEmail ?? undefined }]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         r.failed++;
