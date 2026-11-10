@@ -14,14 +14,19 @@ import { ALL_ROLES, can } from "@/lib/permissions";
 import { requireAccess } from "@/lib/session";
 import { DeleteButton } from "@/components/ui/delete-button";
 
+import { SellerProfileForm } from "@/components/sellers";
+import { getSellerProfile, listSellerProfiles, referralCodeFrom } from "@/domain/sellers";
+
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [team, epics, roleRows, access] = await Promise.all([
+  const access = await requireAccess();
+  const [team, epics, roleRows, myProfile, allProfiles] = await Promise.all([
     db.select().from(users).orderBy(asc(users.name)),
     listEpics(),
     db.select().from(memberRoles),
-    requireAccess(),
+    getSellerProfile(db, access.user.id),
+    listSellerProfiles(db),
   ]);
   const rolesOf = (userId: string) => roleRows.filter((r) => r.userId === userId).map((r) => r.role);
   const canManageTeam = can(access, "team.manage");
@@ -61,6 +66,29 @@ export default async function SettingsPage() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader eyebrow="Ajustes" title="Configuración" subtitle="Guía completa de conexión en docs/SETUP-CONEXION.md" />
+      <Card>
+        <PanelHeader title="Mi perfil de vendedor" subtitle="Tus ligas personales. Aparecen en la ficha de cada lead como «Mis ligas» para copiarlas en un clic." />
+        <SellerProfileForm profile={myProfile} />
+        {canManageTeam && allProfiles.length > 0 && (
+          <div className="border-t border-line px-5 py-4">
+            <p className="label mb-2">Perfiles del equipo</p>
+            <ul className="flex flex-col gap-1 text-sm">
+              {allProfiles.map((p) => {
+                const who = team.find((u) => u.id === p.userId)?.name ?? "—";
+                return (
+                  <li key={p.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-semibold">{who}</span>
+                    <span className="text-muted">referido: {referralCodeFrom(p.referralUrl) ?? "sin liga"}</span>
+                    <span className="text-muted">calendario: {p.bookingUrl ? "sí" : "no"}</span>
+                    <span className="text-muted">código: {p.discountCode ?? "—"}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </Card>
+
       <Card>
         <PanelHeader title="Integraciones" />
         <div className="mt-2">

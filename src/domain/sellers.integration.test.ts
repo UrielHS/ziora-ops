@@ -33,3 +33,21 @@ describe.runIf(enabled)("vendedores: esquema (migración 0015)", () => {
     expect(appUsers.referredByCode).toBeDefined();
   });
 });
+
+describe.runIf(enabled)("vendedores: perfil", () => {
+  it("upsert crea el perfil y luego lo actualiza sin duplicar; vacíos quedan null y el código en mayúsculas", async () => {
+    const { db } = await import("@/db");
+    const { sellerProfiles } = await import("@/db/schema");
+    const { users } = await import("@/db/shared");
+    const { getSellerProfile, upsertSellerProfile } = await import("./sellers");
+    const [u] = await db.select({ id: users.id }).from(users).limit(1);
+    await db.delete(sellerProfiles).where(eq(sellerProfiles.userId, u.id));
+    const a = await upsertSellerProfile(db, u.id, { referralUrl: "https://ziora-copilot.com/r/PRUEBA-1234", discountCode: " euri20 " });
+    expect(a).toMatchObject({ userId: u.id, referralUrl: "https://ziora-copilot.com/r/PRUEBA-1234", bookingUrl: null, discountCode: "EURI20" });
+    const b = await upsertSellerProfile(db, u.id, { referralUrl: "https://ziora-copilot.com/r/PRUEBA-1234", bookingUrl: "https://calendar.app.google/abc", discountCode: "" });
+    expect(b).toMatchObject({ bookingUrl: "https://calendar.app.google/abc", discountCode: null });
+    const rows = await db.select().from(sellerProfiles).where(eq(sellerProfiles.userId, u.id));
+    expect(rows).toHaveLength(1);
+    expect((await getSellerProfile(db, u.id))?.bookingUrl).toBe("https://calendar.app.google/abc");
+  });
+});
