@@ -241,8 +241,10 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
       const v = { ...vars, baja: unsubscribeUrl };
       const subject = renderTemplate(tpl!.subject, v);
       try {
-        // Desde la persona que conoció al lead (responde mejor que un remitente genérico); el relay de Workspace firma cualquier @ziora-copilot.com.
-        const from = ctx.ownerName && ctx.ownerEmail ? `"${ctx.ownerName.replace(/"/g, "")} de Ziora" <${ctx.ownerEmail}>` : m.from;
+        // MAIL_FROM_OWNER=1: sale a nombre y desde la dirección del dueño (solo con el relay de Workspace, que no reescribe el From;
+        // smtp.gmail.com lo cambia por el usuario autenticado). Si no, MAIL_FROM con Reply-To al dueño.
+        const asOwner = process.env.MAIL_FROM_OWNER === "1" && ctx.ownerName && ctx.ownerEmail;
+        const from = asOwner ? `"${ctx.ownerName!.replace(/"/g, "")} de Ziora" <${ctx.ownerEmail}>` : m.from;
         await send(from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }], replyTo: ctx.ownerEmail ?? undefined }]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

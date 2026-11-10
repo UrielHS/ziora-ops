@@ -179,8 +179,10 @@ curl -s -X POST "$URL/api/jobs/run-sequences"   -H "Authorization: Bearer $(gclo
   hora; no se pierde el paso.
 - **Transporte (desde 10-nov-2026):** los correos salen por el relay SMTP de Google Workspace, el mismo que usa la app
   (`SMTP_HOST=smtp-relay.gmail.com`, `SMTP_PORT=587`, `SMTP_USERNAME`, secreto `SMTP_PASSWORD=ziora-ops-smtp-password`). Sin
-  cuenta ni DNS nuevos. El `From` es el dueño del lead («Nombre de Ziora <dueño@ziora-copilot.com>», Reply-To al dueño) y, sin
-  dueño, `MAIL_FROM`. Resend solo se usa si no hay `SMTP_HOST`; sin Resend no hay webhook de aperturas/rebotes (los rebotes
+  cuenta ni DNS nuevos. El `From` es `MAIL_FROM` con Reply-To al dueño del lead; con `MAIL_FROM_OWNER=1` (solo con el relay,
+  que no reescribe el From) sale como «Nombre de Ziora <dueño@ziora-copilot.com>». Alternativa sin costo si el relay falla:
+  `SMTP_HOST=smtp.gmail.com` con el buzón de `SMTP_USERNAME` (Gmail reescribe la dirección del From al usuario autenticado,
+  conserva el nombre, deja copia en Enviados; cupo 2 000/día). Resend solo se usa si no hay `SMTP_HOST`; sin Resend no hay webhook de aperturas/rebotes (los rebotes
   llegan al buzón del dueño). Incidente 10-nov: la primera tanda falló por «Missing environment variable: RESEND_API_KEY»
   (Resend nunca se configuró); se pausó el scheduler y se cambió a SMTP.
 

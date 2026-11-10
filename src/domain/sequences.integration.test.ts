@@ -111,17 +111,25 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     expect((await s.activities(a.id)).some((x) => x.type === "secuencia" && /Enrolado/.test(x.summary))).toBe(true);
   });
 
-  it("el correo sale a nombre y desde la dirección del dueño del lead; sin dueño, desde MAIL_FROM", async () => {
+  it("el correo sale desde MAIL_FROM con Reply-To al dueño; con MAIL_FROM_OWNER=1 sale a nombre y desde la dirección del dueño", async () => {
     const s = await setup();
     const { seq } = await s.mkSequence();
     const a = await s.mkLead();
     const b = await s.mkLead({ ownerId: null });
     await s.seqMod.enroll(s.db, [a.id, b.id], seq.id, s.actor, NOW);
+    delete process.env.MAIL_FROM_OWNER;
     await s.run();
     const byTo = (to: string | null) => s.sent.find((x) => x.emails[0].to === to)!;
-    expect(byTo(a.email).from).toBe(`"${s.owner.name} de Ziora" <${s.owner.email}>`);
+    expect(byTo(a.email).from).toBe(process.env.MAIL_FROM);
     expect(byTo(a.email).emails[0].replyTo).toBe(s.owner.email);
     expect(byTo(b.email).from).toBe(process.env.MAIL_FROM);
+    // Con el relay de Workspace (que no reescribe el From) se puede mandar como el dueño.
+    const c = await s.mkLead();
+    await s.seqMod.enroll(s.db, [c.id], seq.id, s.actor, NOW);
+    process.env.MAIL_FROM_OWNER = "1";
+    try { await s.run(); } finally { delete process.env.MAIL_FROM_OWNER; }
+    expect(byTo(c.email).from).toBe(`"${s.owner.name} de Ziora" <${s.owner.email}>`);
+    expect(byTo(c.email).emails[0].replyTo).toBe(s.owner.email);
   });
 
   it("paso de correo: manda con liga de baja, deja toque, pasa a contactado y programa el WhatsApp del día 3 a las 10:00", async () => {
