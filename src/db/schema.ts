@@ -65,6 +65,9 @@ export const contacts = ops.table(
     lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
     priority: integer("priority"), // 1 alta (P1) · 2 media (P2) · 3 baja (P3-P5 de la hoja)
     segment: text("segment"), // segmento de la hoja de leads, tal cual (HOT, WARM-A, COLD-Virtual…)
+    // Marcados a mano desde la ficha: el dato se conserva pero nadie (ni la cadencia) lo vuelve a usar.
+    emailInvalidAt: timestamp("email_invalid_at", { withTimezone: true }),
+    phoneInvalidAt: timestamp("phone_invalid_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
@@ -670,11 +673,12 @@ export const appUsers = ops.table(
     firstSyncedAt: timestamp("first_synced_at", { withTimezone: true }).notNull().defaultNow(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     removedAt: timestamp("removed_at", { withTimezone: true }), // ya no viene en el snapshot (cuenta borrada)
+    referredByCode: text("referred_by_code"), // código de referido con el que se registró (lo manda la app)
     // Cuenta de prueba o interna (la marca el equipo en Usuarios de Ziora): no se muestra ni cuenta en métricas,
     // MRR ni seguimientos. La sincronización nunca la cambia.
     isTest: boolean("is_test").notNull().default(false),
   },
-  (t) => [index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email)],
+  (t) => [index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email), index("app_users_referred_by_code_idx").on(t.referredByCode)],
 );
 
 // Foto diaria agregada por plan para ver tendencias (sin datos por persona).
@@ -823,3 +827,13 @@ export const adDaily = ops.table(
   },
   (t) => [primaryKey({ columns: [t.campaignId, t.day] })],
 );
+
+// ---------- vendedores: ligas personales (referido, calendario, código de descuento) ----------
+export const sellerProfiles = ops.table("seller_profiles", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  referralUrl: text("referral_url"), // https://ziora-copilot.com/r/<código>
+  bookingUrl: text("booking_url"), // liga de reservas de Google Calendar
+  discountCode: text("discount_code"), // código de Stripe que crea Chris
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+export type SellerProfile = typeof sellerProfiles.$inferSelect;

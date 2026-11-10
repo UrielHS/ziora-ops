@@ -106,6 +106,13 @@
       "when": 1794263794009,
       "tag": "0014_cadencia",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794276626759,
+      "tag": "0015_vendedor",
+      "breakpoints": true
     }
   ]
 }
