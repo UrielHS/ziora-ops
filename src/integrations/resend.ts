@@ -13,6 +13,8 @@ export type OutgoingEmail = {
   html: string;
   unsubscribeUrl: string;
   tags?: { name: string; value: string }[];
+  /** A quién llegan las respuestas (el dominio de envío mail.* no recibe correo). */
+  replyTo?: string;
 };
 
 /** Envía hasta 100 correos en una llamada. Devuelve el id del proveedor por posición. */
@@ -26,6 +28,7 @@ export async function sendBatch(from: string, emails: OutgoingEmail[]): Promise<
       subject: e.subject,
       html: e.html,
       tags: e.tags,
+      replyTo: e.replyTo,
       headers: {
         "List-Unsubscribe": `<${e.unsubscribeUrl}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",

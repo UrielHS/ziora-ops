@@ -145,6 +145,7 @@ type Ctx = {
   contact: typeof contacts.$inferSelect;
   consent: { email: boolean; whatsapp: boolean };
   ownerName: string | null;
+  ownerEmail: string | null;
   templates: Map<string, typeof emailTemplates.$inferSelect>;
 };
 
@@ -158,10 +159,10 @@ async function loadCtx(db: Dbx, e: SequenceEnrollment): Promise<Ctx | null> {
     email: consents.some((c) => c.channel === "email" && c.optIn),
     whatsapp: consents.some((c) => c.channel === "whatsapp" && c.optIn),
   };
-  const [owner] = contact.ownerId ? await db.select({ name: users.name }).from(users).where(eq(users.id, contact.ownerId)).limit(1) : [];
+  const [owner] = contact.ownerId ? await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, contact.ownerId)).limit(1) : [];
   const tplIds = steps.map((s) => s.emailTemplateId).filter((x): x is string => !!x);
   const tpls = tplIds.length ? await db.select().from(emailTemplates).where(inArray(emailTemplates.id, tplIds)) : [];
-  return { seq, steps, contact, consent, ownerName: owner?.name ?? null, templates: new Map(tpls.map((t) => [t.id, t])) };
+  return { seq, steps, contact, consent, ownerName: owner?.name ?? null, ownerEmail: owner?.email ?? null, templates: new Map(tpls.map((t) => [t.id, t])) };
 }
 
 const clearPending = { pendingStepId: null, pendingText: null, pendingSince: null } as const;
@@ -240,7 +241,7 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
       const v = { ...vars, baja: unsubscribeUrl };
       const subject = renderTemplate(tpl!.subject, v);
       try {
-        await send(m.from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }] }]);
+        await send(m.from, [{ to: ctx.contact.email!, subject, html: renderTemplate(tpl!.html, v), unsubscribeUrl, tags: [{ name: "sequence", value: ctx.seq.id }], replyTo: ctx.ownerEmail ?? undefined }]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         r.failed++;

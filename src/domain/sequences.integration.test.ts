@@ -48,7 +48,7 @@ async function setup() {
   const leadsMod = await import("./leads");
   const seqMod = await import("./sequences");
   const { firstName } = await import("./template");
-  const [owner] = await db.select({ id: users.id, name: users.name }).from(users).limit(1);
+  const [owner] = await db.select({ id: users.id, name: users.name, email: users.email }).from(users).limit(1);
   const t = Date.now() + Math.floor(Math.random() * 1000);
   // Corridas anteriores (o rotas) dejan enrollments activos de leads de prueba: se detienen para que los conteos sean de esta prueba.
   await db.update(schema.sequenceEnrollments).set({ status: "detenida", stopReason: "prueba" }).where(and(
@@ -80,8 +80,8 @@ async function setup() {
     return { id, email };
   }
 
-  const sent: { from: string; emails: { to: string; subject: string; html: string }[] }[] = [];
-  const fakeSend = async (from: string, emails: { to: string; subject: string; html: string }[]) => {
+  const sent: { from: string; emails: { to: string; subject: string; html: string; replyTo?: string }[] }[] = [];
+  const fakeSend = async (from: string, emails: { to: string; subject: string; html: string; replyTo?: string }[]) => {
     sent.push({ from, emails });
     return emails.map((_, i) => `id-${i}`);
   };
@@ -209,6 +209,15 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     const acts = await s.activities(a.id);
     expect(acts.filter((x) => x.summary.startsWith("Paso 1 de correo falló"))).toHaveLength(3);
     expect(acts.some((x) => x.summary.startsWith("Paso 1 de correo omitido: 3 intentos de envío fallaron"))).toBe(true);
+  });
+
+  it("el correo lleva reply-to al dueño del lead (el texto pide responder; el dominio de envío no recibe)", async () => {
+    const s = await setup();
+    const { seq } = await s.mkSequence();
+    const a = await s.mkLead();
+    await s.seqMod.enroll(s.db, [a.id], seq.id, s.actor, NOW);
+    await s.run();
+    expect(s.sent[0].emails[0].replyTo).toBe(s.owner.email);
   });
 
   it("una respuesta detiene la secuencia antes del siguiente paso", async () => {
