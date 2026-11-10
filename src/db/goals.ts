@@ -2,14 +2,7 @@ import { and, arrayContains, asc, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { contentPieces, demoRequests, goals } from "@/db/schema";
 
-export const GTM_START = "2026-10-12"; // semana 1 del brief
-
-export function gtmDay(now = new Date()) {
-  return Math.floor((now.getTime() - new Date(`${GTM_START}T00:00:00-06:00`).getTime()) / 86_400_000) + 1;
-}
-export function gtmPhase(day = gtmDay()): "d30" | "d60" | "d90" {
-  return day <= 30 ? "d30" : day <= 60 ? "d60" : "d90";
-}
+export { GTM_START, gtmDay, gtmPhase } from "@/lib/gtm";
 
 /** Metas con su valor actual. Las "auto" se calculan con datos de Ziora Ops en lugar de captura manual. */
 export async function goalsWithValues() {

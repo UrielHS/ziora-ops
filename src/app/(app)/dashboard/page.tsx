@@ -5,6 +5,7 @@ import { Avatar, Badge, Card, cn, Kpi, PanelHeader, Progress, ViewAll } from "@/
 import { db } from "@/db";
 import { activeSprint, listEpics, listUsers } from "@/db/queries";
 import { goalsWithValues, gtmDay, gtmPhase } from "@/db/goals";
+import { gtmWeekLabel } from "@/lib/gtm";
 import { bugs, campaigns, contactConsents, demoRequests, emailTemplates, pullRequests, tasks, contacts, contactTags } from "@/db/schema";
 import { resolveRecipients } from "@/domain/campaigns";
 import { renderTemplate } from "@/domain/template";
@@ -75,7 +76,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <div>
             <p className="text-xs font-semibold text-[#4F6F5F]">
               {cap(fmtDate(now, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}
-              {day > 0 && day <= 91 && <> · Semana {Math.ceil(day / 7)} de 13 del plan GTM</>}
+              {gtmWeekLabel(now) && <> · {gtmWeekLabel(now)}</>}
             </p>
             <h1 className="mt-2 text-[32px] font-extrabold leading-tight tracking-tight text-ink">{greet}, {user.name.split(" ")[0]}</h1>
             <p className="mt-1 text-sm text-[#4F6F5F]">Operación, ventas y producto de Ziora en un solo lugar.</p>
