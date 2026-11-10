@@ -21,6 +21,11 @@ describe("snapshot de la app", () => {
     expect(Snapshot.safeParse({ generatedAt: now.toISOString(), users: [{ ...user, currency: "MXN" }] }).success).toBe(false);
     expect(Snapshot.safeParse({ generatedAt: now.toISOString(), users: [{ ...user, mrrAmount: -1 }] }).success).toBe(false);
   });
+  it("acepta suscripciones semestrales (6 meses −10 %, nov-2026) y rechaza periodos desconocidos", () => {
+    const at = (billingPeriod: string) => Snapshot.safeParse({ generatedAt: now.toISOString(), users: [{ ...user, billingPeriod, mrrAmount: 629.17, currency: "mxn" }] }).success;
+    expect(at("semiannual")).toBe(true);
+    expect(at("quarterly")).toBe(false);
+  });
   it("rechaza cualquier campo extra (protección de datos de pacientes)", () => {
     const r = Snapshot.safeParse({ generatedAt: now.toISOString(), users: [{ ...user, patients: [{ name: "X" }] }] });
     expect(r.success).toBe(false);

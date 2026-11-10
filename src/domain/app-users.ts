@@ -21,7 +21,7 @@ export const SnapshotUser = z.strictObject({
   patientCount: z.number().int().min(0),
   sessionsLast30d: z.number().int().min(0).default(0),
   // Suscripción (opcionales: la app puede mandarlos o no)
-  billingPeriod: z.enum(["monthly", "annual"]).nullable().optional(),
+  billingPeriod: z.enum(["monthly", "semiannual", "annual"]).nullable().optional(),
   mrrAmount: z.number().min(0).max(10_000_000).nullable().optional(),
   currency: z.string().regex(/^[a-z]{3}$/).nullable().optional(),
   currentPeriodEnd: z.iso.datetime({ offset: true }).nullable().optional(),

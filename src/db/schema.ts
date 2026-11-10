@@ -664,7 +664,7 @@ export const appUsers = ops.table(
     sessionsLast30d: integer("sessions_last_30d").notNull().default(0),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     // Suscripción real (Stripe, vía la app). mrrCents null = la app no lo mandó y se usa plan × precio.
-    billingPeriod: text("billing_period"), // monthly | annual
+    billingPeriod: text("billing_period"), // monthly | semiannual | annual
     mrrCents: integer("mrr_cents"),
     currency: text("currency"), // ISO 4217 en minúsculas: mxn, usd…
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
