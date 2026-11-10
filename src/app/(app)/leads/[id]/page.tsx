@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
 import { convertToAccountAction } from "@/actions/leads";
 import { ActionForm, Submit } from "@/components/ui/form";
-import { CadencePanel, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
+import { CadencePanel, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, MyLinks, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
@@ -12,6 +12,7 @@ import { listUsers } from "@/db/queries";
 import { accountContacts, accounts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
 import { loadCadence } from "@/domain/sequences";
+import { getSellerProfile, referralCodeFrom, referralLinkWithUtm, utmCampaignFor } from "@/domain/sellers";
 import { waMessageLink } from "@/domain/phone";
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
@@ -27,7 +28,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const canManage = can(access, "leads.manage");
   const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
   if (!c) notFound();
-  const [users, tags, consents, timeline, [account], cadenceMap, activeSequences] = await Promise.all([
+  const [users, tags, consents, timeline, [account], cadenceMap, activeSequences, myProfile] = await Promise.all([
     listUsers(),
     db.select({ tag: contactTags.tag }).from(contactTags).where(eq(contactTags.contactId, id)),
     db.select().from(contactConsents).where(eq(contactConsents.contactId, id)),
@@ -35,8 +36,13 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
     db.select({ id: accounts.id, name: accounts.name }).from(accountContacts).innerJoin(accounts, eq(accounts.id, accountContacts.accountId)).where(eq(accountContacts.contactId, id)).limit(1),
     loadCadence(db, [id]),
     db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name),
+    getSellerProfile(db, access.user.id),
   ]);
   const cadence = cadenceMap.get(id);
+  const myLinks = myProfile ? {
+    referral: myProfile.referralUrl ? referralLinkWithUtm(myProfile.referralUrl, { campaign: utmCampaignFor(c.source), code: referralCodeFrom(myProfile.referralUrl) }) : null,
+    booking: myProfile.bookingUrl, discountCode: myProfile.discountCode,
+  } : null;
   // El panel de cadencia se muestra a quien puede entrar en una (nuevo/contactado) o ya pasó por una.
   const showCadence = c.leadStatus === "nuevo" || c.leadStatus === "contactado" || !!cadence;
   // Solo quien dirige o coordina una clínica se convierte en cuenta B2B; el resto se vende como persona.
@@ -114,11 +120,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             </Card>
           )}
 
+          {canManage && (
+            <Card>
+              <PanelHeader title="Mis ligas" subtitle="Para pegar en el WhatsApp o el correo: tu liga de prueba (referido), tu calendario y tu código." />
+              <MyLinks links={myLinks} />
+            </Card>
+          )}
+
           <Card>
             <PanelHeader title="Datos de contacto" />
             <dl className="grid grid-cols-1 gap-x-4 gap-y-2 px-5 pb-5 text-sm sm:grid-cols-2">
-              <div><dt className="label">Correo</dt><dd className="break-all">{c.email ?? "—"}</dd></div>
-              <div><dt className="label">Teléfono</dt><dd className="flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-muted" />{c.phone ?? "—"}{c.phoneE164 && <span className="text-xs text-faint">· +{c.phoneE164}</span>}</dd></div>
+              <div><dt className="label">Correo</dt><dd className="flex items-center gap-2 break-all">{c.email ?? "—"}{c.email && <CopyButton text={c.email} />}</dd></div>
+              <div><dt className="label">Teléfono</dt><dd className="flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-muted" />{c.phone ?? "—"}{c.phoneE164 && <span className="text-xs text-faint">· +{c.phoneE164}</span>}{(c.phoneE164 || c.phone) && <CopyButton text={c.phoneE164 ? `+${c.phoneE164}` : c.phone!} />}</dd></div>
               {profile.map(([k, v]) => <div key={k}><dt className="label">{k}</dt><dd>{v}</dd></div>)}
             </dl>
             <div className="flex flex-wrap gap-2 px-5 pb-5">

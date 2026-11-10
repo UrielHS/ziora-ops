@@ -35,6 +35,42 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(acts.find((a) => a.type === "whatsapp")).toMatchObject({ direction: "saliente", actorLabel: "prueba", summary: "Primer mensaje" });
   });
 
+  it("«le mandé mi liga» deja nota saliente y pone siguiente paso a 2 días solo si no había", async () => {
+    const { db } = await import("@/db");
+    const { contactActivities, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { recordReferralLinkSent, setNextAction } = await import("./leads");
+    const t = Date.now();
+    const now = new Date("2026-11-10T16:00:00-06:00");
+    const { id } = await upsertContact(db, { name: "Liga Prueba", email: `liga${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "contactado" });
+    await recordReferralLinkSent(db, id, actor, now);
+    let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c).toMatchObject({ nextAction: "Ver si ya se registró", nextActionOn: "2026-11-12" });
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
+    expect(acts.find((x) => (x.meta as { kind?: string })?.kind === "referral_link")).toMatchObject({ type: "nota", direction: "saliente", summary: "Le mandé mi liga de prueba (referido)" });
+    await setNextAction(db, id, { text: "Llamar", on: "2026-11-20" }, actor);
+    await recordReferralLinkSent(db, id, actor, now);
+    [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c).toMatchObject({ nextAction: "Llamar", nextActionOn: "2026-11-20" }); // no pisa el que ya había
+  });
+
+  it("«ya lo está probando» pasa a en_trial y no retrocede a quien ya paga", async () => {
+    const { db } = await import("@/db");
+    const { contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { markTrying, advanceLead } = await import("./leads");
+    const t = Date.now();
+    const { id } = await upsertContact(db, { name: "Trial Prueba", email: `trial${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    expect(await markTrying(db, id, actor)).toEqual({ ok: true });
+    let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.leadStatus).toBe("en_trial");
+    expect(await markTrying(db, id, actor)).toMatchObject({ ok: false, message: expect.stringMatching(/ya está/i) });
+    await advanceLead(db, id, "pago", actor);
+    expect(await markTrying(db, id, actor)).toMatchObject({ ok: false });
+    [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.leadStatus).toBe("pago");
+  });
+
   it("respondió, dueño, prioridad y siguiente paso quedan en el contacto y en el timeline", async () => {
     const { db } = await import("@/db");
     const { contactActivities, contacts } = await import("@/db/schema");

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRightLeft, CalendarClock, Cog, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
-import { addNoteAction, markRepliedAction, moveLead, postponeAction, recordTouchAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
+import { ArrowRightLeft, CalendarClock, Cog, FlaskConical, Link2, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
+import { addNoteAction, markRepliedAction, markTryingAction, moveLead, postponeAction, recordTouchAction, referralLinkSentAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
 import { enrollAction, stopEnrollmentAction } from "@/actions/sequences";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
@@ -91,11 +91,46 @@ export function TouchButtons({ id }: { id: string }) {
           <Submit variant="secondary" className="!py-1.5 !text-xs"><t.icon className="h-3.5 w-3.5" /> {t.label}</Submit>
         </ActionForm>
       ))}
+      <ActionForm action={referralLinkSentAction} className="contents">
+        <input type="hidden" name="id" value={id} />
+        <Submit variant="secondary" className="!py-1.5 !text-xs"><Link2 className="h-3.5 w-3.5" /> Le mandé mi liga</Submit>
+      </ActionForm>
+      <ActionForm action={markTryingAction} className="contents">
+        <input type="hidden" name="id" value={id} />
+        <Submit variant="secondary" className="!py-1.5 !text-xs"><FlaskConical className="h-3.5 w-3.5" /> Ya lo está probando</Submit>
+      </ActionForm>
       <ActionForm action={markRepliedAction} className="contents">
         <input type="hidden" name="id" value={id} />
         <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
       </ActionForm>
     </div>
+  );
+}
+
+export type SellerLinks = { referral: string | null; booking: string | null; discountCode: string | null };
+
+/** Ficha → «Mis ligas»: lo que el vendedor manda al lead (referido con UTM, calendario, código). Sin perfil, manda a Ajustes. */
+export function MyLinks({ links }: { links: SellerLinks | null }) {
+  const rows: [string, string | null][] = links ? [["Mi liga de referido (con UTM)", links.referral], ["Mi calendario", links.booking], ["Mi código de descuento", links.discountCode]] : [];
+  if (!links || !rows.some(([, v]) => v)) {
+    return (
+      <p className="px-5 pb-5 text-sm text-muted">
+        Aún no tienes ligas guardadas. <Link href="/settings" className="font-semibold text-emerald hover:underline">Configura tus ligas en Ajustes</Link> y aparecerán aquí para copiarlas.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-2 px-5 pb-5">
+      {rows.map(([label, value]) => value && (
+        <li key={label} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-[#FBFAF6] px-3 py-2">
+          <div className="min-w-0">
+            <p className="label">{label}</p>
+            <p className="truncate text-sm">{value}</p>
+          </div>
+          <CopyButton text={value} />
+        </li>
+      ))}
+    </ul>
   );
 }
 

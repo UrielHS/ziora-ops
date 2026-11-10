@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/actions/leads", () => ({
   addNoteAction: vi.fn(), markRepliedAction: vi.fn(), moveLead: vi.fn(), postponeAction: vi.fn(), recordTouchAction: vi.fn(),
-  setLeadStatusAction: vi.fn(), setNextActionAction: vi.fn(),
+  setLeadStatusAction: vi.fn(), setNextActionAction: vi.fn(), referralLinkSentAction: vi.fn(), markTryingAction: vi.fn(),
 }));
 vi.mock("@/actions/sequences", () => ({ enrollAction: vi.fn(), stopEnrollmentAction: vi.fn() }));
 
-const { TodayRow, CadencePanel } = await import("./leads");
+const { TodayRow, CadencePanel, MyLinks } = await import("./leads");
 
 const lead = {
   id: "33333333-3333-4333-8333-333333333333", name: "Ana López", priority: 2, leadStatus: "contactado", jobTitle: "Psicóloga",
@@ -52,5 +52,20 @@ describe("CadencePanel", () => {
     const html = renderToStaticMarkup(<CadencePanel contactId={lead.id} cadence={{ ...cadence, status: "terminada", stopReason: "completada", nextChannel: null, pendingText: null }} sequences={seqs} canManage />);
     expect(html).toContain("Terminada");
     expect(html).toContain("Enrolar");
+  });
+});
+
+describe("MyLinks (ligas del vendedor en la ficha)", () => {
+  it("con perfil muestra la liga de referido con UTM, el calendario y el código, cada uno copiable", () => {
+    const html = renderToStaticMarkup(<MyLinks links={{ referral: "https://ziora-copilot.com/r/CHRIST-ERWK?utm_source=ziora_ops", booking: "https://calendar.app.google/abc", discountCode: "CHRIS20" }} />);
+    expect(html).toContain("https://ziora-copilot.com/r/CHRIST-ERWK?utm_source=ziora_ops");
+    expect(html).toContain("https://calendar.app.google/abc");
+    expect(html).toContain("CHRIS20");
+    expect((html.match(/aria-label="Copiar"/g) ?? []).length).toBe(3);
+  });
+  it("sin perfil manda a Ajustes", () => {
+    const html = renderToStaticMarkup(<MyLinks links={null} />);
+    expect(html).toContain("/settings");
+    expect(html).toMatch(/Configura tus ligas/);
   });
 });

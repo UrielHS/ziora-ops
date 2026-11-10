@@ -117,6 +117,35 @@ export async function markReplied(db: Dbx, contactId: string, actor: Actor, summ
   });
 }
 
+/** «Le mandé mi liga»: nota saliente (meta.kind = referral_link). Si el lead no tenía siguiente paso, lo pone a 2 días: ver si ya se registró. */
+export async function recordReferralLinkSent(db: Dbx, contactId: string, actor: Actor, now = new Date()): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [c] = await tx.select({ nextActionOn: contacts.nextActionOn }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+    if (!c) throw new Error("El contacto no existe.");
+    const set: Partial<typeof contacts.$inferInsert> = { lastContactAt: now };
+    if (!c.nextActionOn) {
+      const on = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+      set.nextAction = "Ver si ya se registró";
+      set.nextActionOn = on.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }); // YYYY-MM-DD en CDMX
+    }
+    await tx.update(contacts).set(set).where(eq(contacts.id, contactId));
+    await advanceLead(tx, contactId, "contactado", actor, { via: "liga" });
+    await logActivity(tx, { contactId, type: "nota", direction: "saliente", actor, summary: "Le mandé mi liga de prueba (referido)", meta: { kind: "referral_link" }, occurredAt: now });
+  });
+}
+
+/** «Ya lo está probando»: a mano, solo hacia adelante. Si ya está en trial o más allá, lo dice y no toca nada. */
+export async function markTrying(db: Dbx, contactId: string, actor: Actor): Promise<{ ok: boolean; message?: string }> {
+  const [c] = await db.select({ leadStatus: contacts.leadStatus }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+  if (!c) return { ok: false, message: "El contacto no existe." };
+  if (!isForward(c.leadStatus, "en_trial")) {
+    const label = c.leadStatus ? LEAD_STATUS[c.leadStatus].label : "sin estado";
+    return { ok: false, message: `Ya está en ${label}; no se retrocede.` };
+  }
+  await advanceLead(db, contactId, "en_trial", actor, { via: "manual" });
+  return { ok: true };
+}
+
 export async function assignOwner(db: Dbx, contactIds: string[], ownerId: string | null, actor: Actor): Promise<void> {
   if (!contactIds.length) return;
   const [owner] = ownerId ? await db.select({ name: users.name }).from(users).where(eq(users.id, ownerId)).limit(1) : [];

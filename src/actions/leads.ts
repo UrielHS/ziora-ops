@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { leadStatusEnum } from "@/db/schema";
 import {
-  assignOwner, convertLeadToAccount, logActivity, markReplied, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
+  assignOwner, convertLeadToAccount, logActivity, markReplied, markTrying, recordReferralLinkSent, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
 } from "@/domain/leads";
 import { completePendingTouch, enroll, enrollMessage } from "@/domain/sequences";
 import { formAction, type ActionState } from "@/lib/action";
@@ -57,6 +57,19 @@ const _recordTouch = formAction(z.object({ id, channel, summary: z.string().trim
   if (d.channel === "whatsapp" || d.channel === "correo") await completePendingTouch(db, d.id, d.channel);
   refresh(d.id);
   return "Toque registrado";
+});
+
+const _referralLinkSent = formAction(z.object({ id }), async (d) => {
+  await recordReferralLinkSent(db, d.id, await actor());
+  refresh(d.id);
+  return "Liga registrada";
+});
+
+const _markTrying = formAction(z.object({ id }), async (d) => {
+  const r = await markTrying(db, d.id, await actor());
+  if (!r.ok) throw new Error(r.message ?? "No se pudo cambiar el estado");
+  refresh(d.id);
+  return "Marcado como en trial";
 });
 
 const _markReplied = formAction(z.object({ id, summary: z.string().trim().max(500).optional() }), async (d) => {
@@ -131,6 +144,8 @@ const _convertToAccount = formAction(z.object({ id, name: z.string().trim().max(
 export async function setLeadStatusAction(prev: ActionState, fd: FormData) { return _setLeadStatus(prev, fd); }
 export async function recordTouchAction(prev: ActionState, fd: FormData) { return _recordTouch(prev, fd); }
 export async function markRepliedAction(prev: ActionState, fd: FormData) { return _markReplied(prev, fd); }
+export async function referralLinkSentAction(prev: ActionState, fd: FormData) { return _referralLinkSent(prev, fd); }
+export async function markTryingAction(prev: ActionState, fd: FormData) { return _markTrying(prev, fd); }
 export async function setNextActionAction(prev: ActionState, fd: FormData) { return _setNextAction(prev, fd); }
 export async function postponeAction(prev: ActionState, fd: FormData) { return _postpone(prev, fd); }
 export async function assignOwnerAction(prev: ActionState, fd: FormData) { return _assignOwner(prev, fd); }
