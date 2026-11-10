@@ -61,11 +61,15 @@ describe("MyLinks (ligas del vendedor en la ficha)", () => {
     expect(html).toContain("https://ziora-copilot.com/r/CHRIST-ERWK?utm_source=ziora_ops");
     expect(html).toContain("https://calendar.app.google/abc");
     expect(html).toContain("CHRIS20");
-    expect((html.match(/aria-label="Copiar"/g) ?? []).length).toBe(3);
+    // 3 ligas propias + 3 códigos generales (ZIORA5/10/15), todos copiables
+    expect((html.match(/aria-label="Copiar"/g) ?? []).length).toBe(6);
+    expect(html).toContain("ZIORA10");
   });
-  it("sin perfil manda a Ajustes", () => {
+  it("sin perfil manda a Ajustes pero igual muestra los códigos de descuento generales", () => {
     const html = renderToStaticMarkup(<MyLinks links={null} />);
     expect(html).toContain("/settings");
     expect(html).toMatch(/Configura tus ligas/);
+    for (const code of ["ZIORA5", "ZIORA10", "ZIORA15"]) expect(html).toContain(code);
+    expect((html.match(/aria-label="Copiar"/g) ?? []).length).toBe(3);
   });
 });

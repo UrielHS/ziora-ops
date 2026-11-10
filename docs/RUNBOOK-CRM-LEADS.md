@@ -202,8 +202,10 @@ de cada lead las muestra en **Mis ligas** con botón Copiar; la de referido llev
 1. Deploy normal (`deploy.yml`). La migración `0015_vendedor` es aditiva e idempotente (tabla `ops.seller_profiles`, columnas
    `contacts.email_invalid_at` / `phone_invalid_at`, `app_users.referred_by_code`); volver a la revisión anterior no la necesita revertir.
 2. Cada vendedor llena su perfil en Ajustes. Quien tiene `team.manage` ve ahí mismo los perfiles de todo el equipo.
-3. Códigos de descuento: se crean en Stripe (Dashboard → Productos → Cupones → cupón con % y vigencia → «Código de promoción», uno por
-   vendedor, p. ej. `EURI15`) y se pegan en el perfil. Ops no habla con Stripe: el código es texto para copiar.
+3. Códigos de descuento: los generales `ZIORA5`, `ZIORA10` y `ZIORA15` ya existen en Stripe (LIVE, 10-nov-2026: % sobre el primer cobro,
+   sin caducidad) y salen en la ficha de todo lead (`src/lib/discounts.ts`); el cliente los teclea en la página de pago de Stripe. Un
+   código personal por vendedor es opcional: se crea en Stripe (Cupones → «Código de promoción») y se pega en el perfil. Ops no habla
+   con Stripe: el código es texto para copiar.
 4. Referidos por vendedor: el conteo sale del snapshot de la app (`referredByCode`, rama de ziora-gcp `feat/ops-snapshot-referred-by`).
    Hasta que ese cambio esté en prod, la tarjeta de `/leads` dice «La app aún no reporta referidos». Se cuenta por código de referido
    (lo único que la app guarda), no por UTM; cuentas de prueba y bajas no cuentan.

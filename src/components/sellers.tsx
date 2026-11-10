@@ -15,7 +15,7 @@ export function SellerProfileForm({ profile }: { profile: SellerProfile | null }
       <Field label="Mi liga de calendario" hint="Página de reservas de Google Calendar para que el lead elija hora.">
         <input name="bookingUrl" type="url" defaultValue={profile?.bookingUrl ?? ""} placeholder="https://calendar.app.google/…" className={inputCls} />
       </Field>
-      <Field label="Mi código de descuento" hint="Lo crea Chris en Stripe. Mayúsculas, sin espacios.">
+      <Field label="Mi código personal (opcional)" hint="Los códigos generales ZIORA5, ZIORA10 y ZIORA15 ya salen en cada ficha; aquí solo va uno tuyo si Chris te lo crea en Stripe.">
         <input name="discountCode" defaultValue={profile?.discountCode ?? ""} placeholder="EURI20" className={inputCls} />
       </Field>
       <div><Submit>Guardar</Submit></div>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightLeft, CalendarClock, Cog, FlaskConical, Link2, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
+import { DISCOUNT_CODES } from "@/lib/discounts";
 import { addNoteAction, markRepliedAction, markTryingAction, moveLead, postponeAction, recordTouchAction, referralLinkSentAction, setChannelInvalidAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
 import { enrollAction, stopEnrollmentAction } from "@/actions/sequences";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
@@ -138,28 +139,44 @@ export function ChannelInvalidButton({ id, channel, invalid }: { id: string; cha
 
 export type SellerLinks = { referral: string | null; booking: string | null; discountCode: string | null };
 
-/** Ficha → «Mis ligas»: lo que el vendedor manda al lead (referido con UTM, calendario, código). Sin perfil, manda a Ajustes. */
+/** Ficha → «Mis ligas»: lo que el vendedor manda al lead (referido con UTM, calendario, código personal) y los códigos de descuento generales. Sin perfil, manda a Ajustes. */
 export function MyLinks({ links }: { links: SellerLinks | null }) {
-  const rows: [string, string | null][] = links ? [["Mi liga de referido (con UTM)", links.referral], ["Mi calendario", links.booking], ["Mi código de descuento", links.discountCode]] : [];
-  if (!links || !rows.some(([, v]) => v)) {
-    return (
-      <p className="px-5 pb-5 text-sm text-muted">
-        Aún no tienes ligas guardadas. <Link href="/settings" className="font-semibold text-emerald hover:underline">Configura tus ligas en Ajustes</Link> y aparecerán aquí para copiarlas.
-      </p>
-    );
-  }
+  const rows: [string, string | null][] = links ? [["Mi liga de referido (con UTM)", links.referral], ["Mi calendario", links.booking], ["Mi código personal", links.discountCode]] : [];
+  const any = rows.some(([, v]) => v);
   return (
-    <ul className="flex flex-col gap-2 px-5 pb-5">
-      {rows.map(([label, value]) => value && (
-        <li key={label} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-[#FBFAF6] px-3 py-2">
-          <div className="min-w-0">
-            <p className="label">{label}</p>
-            <p className="truncate text-sm">{value}</p>
-          </div>
-          <CopyButton text={value} />
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-3 px-5 pb-5">
+      {!links || !any ? (
+        <p className="text-sm text-muted">
+          Aún no tienes ligas guardadas. <Link href="/settings" className="font-semibold text-emerald hover:underline">Configura tus ligas en Ajustes</Link> y aparecerán aquí para copiarlas.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {rows.map(([label, value]) => value && (
+            <li key={label} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-[#FBFAF6] px-3 py-2">
+              <div className="min-w-0">
+                <p className="label">{label}</p>
+                <p className="truncate text-sm">{value}</p>
+              </div>
+              <CopyButton text={value} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div>
+        <p className="label">Códigos de descuento (para todo el equipo; el cliente lo teclea en la página de pago)</p>
+        <ul className="mt-1 flex flex-col gap-2">
+          {DISCOUNT_CODES.map((d) => (
+            <li key={d.code} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-[#FBFAF6] px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{d.code}</p>
+                <p className="text-xs text-muted">{d.label}</p>
+              </div>
+              <CopyButton text={d.code} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 

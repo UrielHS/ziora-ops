@@ -122,7 +122,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
           {canManage && (
             <Card>
-              <PanelHeader title="Mis ligas" subtitle="Para pegar en el WhatsApp o el correo: tu liga de prueba (referido), tu calendario y tu código." />
+              <PanelHeader title="Mis ligas y códigos" subtitle="Para pegar en el WhatsApp o el correo: tu liga de prueba (referido), tu calendario y los códigos de descuento." />
               <MyLinks links={myLinks} />
             </Card>
           )}
