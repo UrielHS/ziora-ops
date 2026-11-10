@@ -26,6 +26,8 @@ export const SnapshotUser = z.strictObject({
   currency: z.string().regex(/^[a-z]{3}$/).nullable().optional(),
   currentPeriodEnd: z.iso.datetime({ offset: true }).nullable().optional(),
   cancelAtPeriodEnd: z.boolean().optional(),
+  // Código de referido con el que se registró (la app lo manda desde nov-2026; versiones viejas no)
+  referredByCode: z.string().max(32).nullable().optional(),
 });
 export const Snapshot = z.strictObject({
   generatedAt: z.iso.datetime({ offset: true }),
@@ -123,6 +125,7 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
     patientCount: u.patientCount, sessionsLast30d: u.sessionsLast30d,
     billingPeriod: u.billingPeriod ?? null, mrrCents: u.mrrAmount == null ? null : Math.round(u.mrrAmount * 100),
     currency: u.currency ?? null, currentPeriodEnd: toDate(u.currentPeriodEnd), cancelAtPeriodEnd: u.cancelAtPeriodEnd ?? false,
+    referredByCode: u.referredByCode ?? null,
     syncedAt: now, removedAt: null,
   }));
 
@@ -136,6 +139,8 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
           patientCount: sql`excluded.patient_count`, sessionsLast30d: sql`excluded.sessions_last_30d`,
           billingPeriod: sql`excluded.billing_period`, mrrCents: sql`excluded.mrr_cents`, currency: sql`excluded.currency`,
           currentPeriodEnd: sql`excluded.current_period_end`, cancelAtPeriodEnd: sql`excluded.cancel_at_period_end`,
+          // La atribución es permanente en la app: si el snapshot no trae código (o trae null), se conserva el que había.
+          referredByCode: sql`coalesce(excluded.referred_by_code, app_users.referred_by_code)`,
           syncedAt: sql`excluded.synced_at`, removedAt: sql`null`,
         },
       });

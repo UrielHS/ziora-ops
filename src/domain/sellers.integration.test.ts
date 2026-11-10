@@ -51,3 +51,23 @@ describe.runIf(enabled)("vendedores: perfil", () => {
     expect((await getSellerProfile(db, u.id))?.bookingUrl).toBe("https://calendar.app.google/abc");
   });
 });
+
+describe.runIf(enabled)("vendedores: referidos por vendedor", () => {
+  it("cuenta registros y pagos de la app por código de referido del perfil", async () => {
+    const { db } = await import("@/db");
+    const { appUsers, sellerProfiles } = await import("@/db/schema");
+    const { users } = await import("@/db/shared");
+    const { upsertSellerProfile } = await import("./sellers");
+    const { referralsBySeller } = await import("./referrals");
+    const t = Date.now();
+    const code = `REF-${t.toString(36).toUpperCase()}`;
+    const [u] = await db.select({ id: users.id, name: users.name }).from(users).limit(1);
+    await db.delete(sellerProfiles).where(eq(sellerProfiles.userId, u.id));
+    await upsertSellerProfile(db, u.id, { referralUrl: `https://ziora-copilot.com/r/${code.toLowerCase()}` });
+    const mk = (i: number, plan: string, status: string) => ({ uid: `${code}-${i}`, email: `${code}-${i}@example.com`.toLowerCase(), plan, status, patientCount: 0, sessionsLast30d: 0, syncedAt: new Date(), referredByCode: code });
+    await db.insert(appUsers).values([mk(1, "free", "free"), mk(2, "pro", "active"), mk(3, "pro", "trialing")]);
+    const rows = await referralsBySeller(db);
+    const mine = rows.find((r) => r.userId === u.id);
+    expect(mine).toMatchObject({ name: u.name, code, signups: 3, paying: 1 });
+  });
+});

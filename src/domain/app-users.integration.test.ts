@@ -58,6 +58,28 @@ describeDb("usuarios de la app y seguimiento 1:1", async () => {
     await expect(f.completeFollowup(db, { id: trial.id, outcome: "otra vez", health: "green" })).rejects.toThrow(/ya se cerró/);
   });
 
+  it("guarda el código de referido del snapshot y lo conserva si el snapshot no lo trae", async () => {
+    const { db } = await import("@/db");
+    const { appUsers } = await import("@/db/schema");
+    const { applySnapshot, Snapshot } = await import("./app-users");
+    const { eq } = await import("drizzle-orm");
+    const now = new Date();
+    const uid = `ref-${now.getTime()}`;
+    const base = { uid, email: `${uid}@example.com`, plan: "free", status: "free", patientCount: 0, sessionsLast30d: 0 };
+    await applySnapshot(db, Snapshot.parse({ generatedAt: now.toISOString(), users: [{ ...base, referredByCode: "CHRIST-ERWK" }] }), now);
+    let [u] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(u.referredByCode).toBe("CHRIST-ERWK");
+    await applySnapshot(db, Snapshot.parse({ generatedAt: now.toISOString(), users: [base] }), now);
+    [u] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(u.referredByCode).toBe("CHRIST-ERWK");
+    await applySnapshot(db, Snapshot.parse({ generatedAt: now.toISOString(), users: [{ ...base, referredByCode: null }] }), now);
+    [u] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(u.referredByCode).toBe("CHRIST-ERWK"); // la atribución es permanente en la app: null tampoco la borra
+    await applySnapshot(db, Snapshot.parse({ generatedAt: now.toISOString(), users: [{ ...base, referredByCode: "OTRO-CODE" }] }), now);
+    [u] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(u.referredByCode).toBe("OTRO-CODE");
+  });
+
   it("una cuenta de prueba se conserva al sincronizar y no cuenta en el resumen ni en seguimientos", async () => {
     const { setAppUserTest } = await import("./app-users");
     const plan = `pt${tag}`;

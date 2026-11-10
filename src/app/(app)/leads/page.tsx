@@ -3,12 +3,13 @@ import { and, eq, exists, ilike, isNotNull, isNull, or, sql, type SQL } from "dr
 import { bulkLeadsAction } from "@/actions/leads";
 import { LeadCard, LeadsBoard } from "@/components/leads";
 import { SelectAll } from "@/components/select-all";
-import { btn, Card, cn, inputCls, PageHeader, Select } from "@/components/ui";
+import { btn, Card, cn, inputCls, PageHeader, PanelHeader, Select } from "@/components/ui";
 import { ActionForm, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
 import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
 import { LEAD_ORDER, ownerFilter } from "@/domain/leads";
+import { appReportsReferrals, referralsBySeller } from "@/domain/referrals";
 import { todayISO } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
@@ -63,6 +64,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     ["En trial", k.trial, "Probando Ziora"],
     ["Pagaron", k.pago, "Clientes"],
   ];
+
+  const [referrals, appReports] = canManage ? await Promise.all([referralsBySeller(db), appReportsReferrals(db)]) : [[], false];
 
   return (
     <div className="flex flex-col gap-5">
@@ -129,6 +132,27 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         />
       </ActionForm>
       {rows.length === 0 && <p className="text-sm text-muted">Sin leads con estos filtros. Importa la hoja desde Contactos o quita el filtro &quot;solo los míos&quot;.</p>}
+
+      {canManage && (
+        <Card>
+          <PanelHeader title="Referidos por vendedor" subtitle="Terapeutas que se registraron en la app con el código de referido de cada quien, y cuántos ya pagan." />
+          {!appReports ? (
+            <p className="px-5 pb-5 text-sm text-muted">La app aún no reporta referidos. En cuanto mande el código con cada usuario, aquí sale el conteo por vendedor.</p>
+          ) : referrals.length === 0 ? (
+            <p className="px-5 pb-5 text-sm text-muted">Nadie tiene liga de referido en su perfil. Cada quien la pone en Ajustes → Mi perfil de vendedor.</p>
+          ) : (
+            <ul className="grid gap-2 px-5 pb-5 sm:grid-cols-2 lg:grid-cols-4">
+              {referrals.map((r) => (
+                <li key={r.userId} className="rounded-2xl border border-line bg-[#FBFAF6] px-4 py-3">
+                  <p className="truncate font-semibold">{r.name}</p>
+                  <p className="text-xs text-muted">{r.code}</p>
+                  <p className="mt-1 text-sm"><span className="text-xl font-semibold">{r.signups}</span> registros · <span className="font-semibold text-emerald">{r.paying}</span> pagan</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
