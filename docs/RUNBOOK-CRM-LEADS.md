@@ -189,3 +189,38 @@ update ops.sequence_enrollments set status = 'detenida', stop_reason = 'rollback
 ```
 La migración `0014` no estorba al código anterior: volver a la revisión previa de Cloud Run funciona sin revertirla. Para
 reanudar: `gcloud scheduler jobs resume ziora-ops-run-sequences …` y volver a enrolar (los detenidos no se reactivan solos).
+
+## 8. Herramientas del vendedor (ligas, datos incorrectos, dueño, referidos)
+
+Qué es: cada vendedor (Chris, Eurídice, Rafa, Uriel) guarda en **Ajustes → Mi perfil de vendedor** su liga de referido de la app
+(`https://ziora-copilot.com/r/<CÓDIGO>`), su liga de calendario (`https://calendar.app.google/…`) y su código de descuento. La ficha
+de cada lead las muestra en **Mis ligas** con botón Copiar; la de referido lleva UTM
+(`utm_source=ziora_ops&utm_medium=vendedor&utm_campaign=mtw-2026|leads&utm_content=<CÓDIGO>`; `mtw-2026` si el lead vino de la hoja).
+
+### 8.1 Orden tras el merge
+
+1. Deploy normal (`deploy.yml`). La migración `0015_vendedor` es aditiva e idempotente (tabla `ops.seller_profiles`, columnas
+   `contacts.email_invalid_at` / `phone_invalid_at`, `app_users.referred_by_code`); volver a la revisión anterior no la necesita revertir.
+2. Cada vendedor llena su perfil en Ajustes. Quien tiene `team.manage` ve ahí mismo los perfiles de todo el equipo.
+3. Códigos de descuento: se crean en Stripe (Dashboard → Productos → Cupones → cupón con % y vigencia → «Código de promoción», uno por
+   vendedor, p. ej. `EURI15`) y se pegan en el perfil. Ops no habla con Stripe: el código es texto para copiar.
+4. Referidos por vendedor: el conteo sale del snapshot de la app (`referredByCode`, rama de ziora-gcp `feat/ops-snapshot-referred-by`).
+   Hasta que ese cambio esté en prod, la tarjeta de `/leads` dice «La app aún no reporta referidos». Se cuenta por código de referido
+   (lo único que la app guarda), no por UTM; cuentas de prueba y bajas no cuentan.
+
+### 8.2 Uso diario
+
+- Ficha → Datos de contacto: Copiar junto a correo y teléfono. «Correo incorrecto» / «Teléfono incorrecto» marcan el dato (no lo borran):
+  badge rojo en ficha, kanban y Mi día; la cadencia omite ese paso («Paso N de correo omitido: correo marcado incorrecto») y sigue con el
+  siguiente; Mi día deja de ofrecer el WhatsApp. El mismo botón lo desmarca.
+- Ficha → Registrar toque: «Le mandé mi liga» deja una nota saliente y, si no había siguiente paso, «Ver si ya se registró» a 2 días;
+  «Ya lo está probando» pasa el lead a trial (solo adelante: si ya pagó, no retrocede).
+- Kanban: primer nombre del dueño en cada tarjeta y filtro «Dueño» (`?dueno=<uuid>` o `?dueno=ninguno`).
+
+### 8.3 Verificación
+
+```sql
+select u.name, p.referral_url, p.booking_url, p.discount_code from ops.seller_profiles p join public.users u on u.id = p.user_id;
+select count(*) filter (where email_invalid_at is not null) correo_mal, count(*) filter (where phone_invalid_at is not null) tel_mal from ops.contacts;
+select referred_by_code, count(*) from ops.app_users where referred_by_code is not null group by 1 order by 2 desc;
+```

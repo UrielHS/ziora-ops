@@ -24,7 +24,8 @@ con un mismo secreto: `OPS_BRIDGE_SECRET` en Firebase = `ZIORA_APP_BRIDGE_SECRET
     "uid": "abc123", "email": "psic@ejemplo.com", "name": "Psic. Ana López",
     "plan": "pro", "status": "active",
     "createdAt": "2026-08-01T15:00:00Z", "lastActiveAt": "2026-11-02T22:10:00Z", "trialEndsAt": null,
-    "patientCount": 23, "sessionsLast30d": 41
+    "patientCount": 23, "sessionsLast30d": 41,
+    "referredByCode": "CHRIST-ERWK"
   }]
 }
 ```
@@ -32,6 +33,10 @@ con un mismo secreto: `OPS_BRIDGE_SECRET` en Firebase = `ZIORA_APP_BRIDGE_SECRET
 El esquema es **estricto** (`src/domain/app-users.ts`): si la función manda cualquier campo extra, la
 sincronización completa se rechaza y no se guarda nada. Es a propósito: protege contra que algún día se
 cuele un dato de paciente. El webhook de ayuda también es estricto.
+
+`referredByCode` (opcional, desde nov-2026): código de referido con el que se registró el terapeuta
+(`referrals` → `referral_codes.code`, sin revocados). Si una versión vieja de la app no lo manda, o manda `null`,
+Ops conserva el que ya tenía. Alimenta «Referidos por vendedor» en `/leads`.
 
 ## Pasos
 
