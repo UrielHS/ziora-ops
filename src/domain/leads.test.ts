@@ -61,3 +61,14 @@ describe("todayBuckets (Mi día)", async () => {
     expect(b.inSequence).toEqual([]);
   });
 });
+
+describe("ownerFilter (filtro «Dueño» del kanban)", async () => {
+  const { ownerFilter } = await import("./leads");
+  it("sin parámetro o con basura no filtra; «ninguno» pide sin dueño; un uuid pide a esa persona", () => {
+    expect(ownerFilter(undefined)).toEqual({ kind: "any" });
+    expect(ownerFilter("")).toEqual({ kind: "any" });
+    expect(ownerFilter("lo que sea")).toEqual({ kind: "any" });
+    expect(ownerFilter("ninguno")).toEqual({ kind: "none" });
+    expect(ownerFilter("0f738b62-1fe1-436a-8cd7-c01e60bea639")).toEqual({ kind: "user", id: "0f738b62-1fe1-436a-8cd7-c01e60bea639" });
+  });
+});

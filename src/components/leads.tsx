@@ -35,7 +35,10 @@ export function LeadCard({ c, owner, selectable = true }: { c: Lead; owner?: str
             {c.name}
           </Link>
         </div>
-        <Avatar name={owner} size={22} />
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted" title={owner ? `Dueño: ${owner}` : "Sin dueño"}>
+          {owner ? owner.split(" ")[0] : "Sin dueño"}
+          <Avatar name={owner} size={22} />
+        </span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
         {c.jobTitle && <span className="truncate font-semibold text-ink">{c.jobTitle}</span>}

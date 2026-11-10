@@ -117,6 +117,14 @@ export async function markReplied(db: Dbx, contactId: string, actor: Actor, summ
   });
 }
 
+/** Filtro «Dueño» del kanban (query param `dueno`): `ninguno` = sin dueño, un uuid = esa persona, cualquier otra cosa = sin filtro. */
+export type OwnerFilter = { kind: "any" } | { kind: "none" } | { kind: "user"; id: string };
+export function ownerFilter(param: string | undefined | null): OwnerFilter {
+  if (!param) return { kind: "any" };
+  if (param === "ninguno") return { kind: "none" };
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(param) ? { kind: "user", id: param } : { kind: "any" };
+}
+
 /** Correo o teléfono incorrecto: se marca (no se borra) para que nadie, ni la cadencia, lo vuelva a usar. `invalid=false` lo desmarca. */
 export async function setChannelInvalid(db: Dbx, contactId: string, channel: "email" | "phone", invalid: boolean, actor: Actor, now = new Date()): Promise<void> {
   const col = channel === "email" ? "emailInvalidAt" : "phoneInvalidAt";

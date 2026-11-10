@@ -8,14 +8,14 @@ import { ActionForm, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
 import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
-import { LEAD_ORDER } from "@/domain/leads";
+import { LEAD_ORDER, ownerFilter } from "@/domain/leads";
 import { todayISO } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string };
+type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string };
 
 const ACCENT: Record<string, string> = {
   nuevo: "bg-faint", contactado: "bg-[#1D5FA8]", respondio: "bg-[#6B4FA8]", demo_agendada: "bg-[#1D5FA8]", en_trial: "bg-[#D99A2B]", pago: "bg-emerald", perdido: "bg-danger",
@@ -29,7 +29,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   const where: SQL[] = [isNotNull(contacts.leadStatus)];
   // Por defecto: mis leads y los que nadie ha tomado. "todos=1" muestra el embudo completo.
-  if (sp.todos !== "1") where.push(or(eq(contacts.ownerId, access.user.id), isNull(contacts.ownerId))!);
+  const owner = ownerFilter(sp.dueno);
+  if (owner.kind === "none") where.push(isNull(contacts.ownerId));
+  else if (owner.kind === "user") where.push(eq(contacts.ownerId, owner.id));
+  else if (sp.todos !== "1") where.push(or(eq(contacts.ownerId, access.user.id), isNull(contacts.ownerId))!);
   if (sp.prioridad) where.push(eq(contacts.priority, Number(sp.prioridad)));
   if (sp.origen) where.push(eq(contacts.source, sp.origen as (typeof contactSourceEnum.enumValues)[number]));
   if (sp.ciudad) where.push(eq(contacts.city, sp.ciudad as (typeof cityEnum.enumValues)[number]));
@@ -91,6 +94,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         <Select name="origen" defaultValue={sp.origen} placeholder="Todos los orígenes" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_SOURCE)} />
         <Select name="etiqueta" defaultValue={sp.etiqueta} placeholder="Todas las etiquetas" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_TAG)} />
         <Select name="ciudad" defaultValue={sp.ciudad} placeholder="Todas las ciudades" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CITY)} />
+        <Select name="dueno" defaultValue={sp.dueno} placeholder="Cualquier dueño" className="w-auto rounded-full py-1.5 text-xs" options={[["ninguno", "Sin dueño"], ...userOptions(users)]} />
         <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">
           <input type="checkbox" name="todos" value="1" defaultChecked={sp.todos === "1"} className="h-3.5 w-3.5 accent-emerald" />
           Ver todos, no solo los míos
