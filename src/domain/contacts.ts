@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { contactConsents, contacts, contactTagEnum, contactTags, type CityValue, type ContactSource, type ContactTag, type LeadStatus } from "@/db/schema";
 import { normalizePhoneE164 } from "./phone";
-import { logActivity, setLeadStatus, SYSTEM_ACTOR } from "./leads";
+import { logActivity, setLeadStatus, SYSTEM_ACTOR, type Actor } from "./leads";
 import { eoContacts, eoContactTags, organizations } from "@/db/shared";
 
 export function normalizeEmail(email: string): string {
@@ -59,6 +59,27 @@ const TAGS = new Set<string>(contactTagEnum.enumValues);
  * Crea o completa un contacto de Ziora Ops (ops.contacts), buscándolo por correo o, si no hay correo, por teléfono E.164.
  * Nunca pisa datos existentes: solo llena lo vacío, agrega etiquetas, consentimientos y suma columnas nuevas a details.
  */
+export type ContactEdit = { name: string; phone?: string | null; city?: CityValue | null; notes?: string | null; company?: string | null; jobTitle?: string | null };
+
+/** Edición manual desde el formulario. Si el teléfono cambia, se recalcula el E.164 y deja de estar «marcado incorrecto». */
+export async function editContact(db: Db, id: string, d: ContactEdit, tags: ContactTag[], actor: Actor, now = new Date()): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [cur] = await tx.select({ phone: contacts.phone, phoneInvalidAt: contacts.phoneInvalidAt }).from(contacts).where(eq(contacts.id, id));
+    const phone = d.phone?.trim() || null;
+    const phoneChanged = !!cur && phone !== cur.phone;
+    await tx.update(contacts).set({
+      name: d.name, phone, city: d.city ?? null, notes: d.notes ?? null, company: d.company ?? null, jobTitle: d.jobTitle ?? null,
+      ...(phoneChanged ? { phoneE164: normalizePhoneE164(phone), phoneInvalidAt: null } : {}),
+    }).where(eq(contacts.id, id));
+    if (phoneChanged && cur?.phoneInvalidAt) {
+      await logActivity(tx, { contactId: id, type: "nota", actor, summary: "Corrigió el teléfono; deja de estar marcado como incorrecto", meta: { kind: "channel_invalid", channel: "phone", invalid: false }, occurredAt: now });
+    }
+    // Las etiquetas son propias de Ziora Ops: se reemplazan por las elegidas.
+    await tx.delete(contactTags).where(eq(contactTags.contactId, id));
+    if (tags.length) await tx.insert(contactTags).values(tags.map((tag) => ({ contactId: id, tag }))).onConflictDoNothing();
+  });
+}
+
 export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: string; created: boolean }> {
   const email = input.email ? normalizeEmail(input.email) : null;
   const phoneE164 = input.phoneE164 ?? normalizePhoneE164(input.phone);

@@ -116,3 +116,28 @@ describe.runIf(enabled)("contactos propios e importación de Event Ops", () => {
     expect(dup).toHaveLength(1);
   });
 });
+
+describe.runIf(enabled)("edición manual del contacto", () => {
+  it("corregir el teléfono quita la marca de incorrecto y recalcula el E.164; guardar el mismo teléfono la conserva", async () => {
+    const { db } = await import("@/db");
+    const { contacts, contactActivities } = await import("@/db/schema");
+    const { editContact, upsertContact } = await import("./contacts");
+    const { setChannelInvalid } = await import("./leads");
+    const actor = { userId: null, label: "Prueba" };
+    const t = Date.now();
+    const { id } = await upsertContact(db, { name: "Tel Malo", email: `telmalo${t}@example.com`, phone: "55 1234 5678", source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    await setChannelInvalid(db, id, "phone", true, actor);
+
+    await editContact(db, id, { name: "Tel Malo", phone: "55 1234 5678" }, ["lead"], actor);
+    let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.phoneInvalidAt).toBeInstanceOf(Date); // mismo número: sigue marcado
+
+    await editContact(db, id, { name: "Tel Malo", phone: "+52 55 9876 5432" }, ["lead"], actor);
+    [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.phoneInvalidAt).toBeNull();
+    expect(c.phoneE164).toBe("525598765432");
+    const acts = (await db.select().from(contactActivities).where(eq(contactActivities.contactId, id))).map((x) => x.summary);
+    expect(acts).toContain("Corrigió el teléfono; deja de estar marcado como incorrecto");
+  });
+});
+

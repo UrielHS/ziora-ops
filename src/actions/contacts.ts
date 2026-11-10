@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { contactConsents, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
-import { importFromEventOps, optOut, upsertContact } from "@/domain/contacts";
+import { editContact, importFromEventOps, optOut, upsertContact } from "@/domain/contacts";
 import { importLeadSheet, parseLeadSheet } from "@/domain/lead-sheet";
 import { formAction, type ActionState } from "@/lib/action";
 import { requirePermission } from "@/lib/session";
@@ -47,16 +47,8 @@ const _updateContact = formAction(
     tags: z.array(z.enum(contactTagEnum.enumValues)).default([]),
   }),
   async ({ id, tags, ...d }) => {
-    await requirePermission("leads.manage");
-    await db.transaction(async (tx) => {
-      await tx.update(contacts).set({
-        name: d.name, phone: d.phone ?? null, city: d.city ?? null, notes: d.notes ?? null,
-        company: d.company ?? null, jobTitle: d.jobTitle ?? null,
-      }).where(eq(contacts.id, id));
-      // Las etiquetas son propias de Ziora Ops: se reemplazan por las elegidas.
-      await tx.delete(contactTags).where(eq(contactTags.contactId, id));
-      if (tags.length) await tx.insert(contactTags).values(tags.map((tag) => ({ contactId: id, tag }))).onConflictDoNothing();
-    });
+    const { user } = await requirePermission("leads.manage");
+    await editContact(db, id, d, tags, { userId: user.id, label: user.name });
     revalidatePath("/contacts");
   },
 );
