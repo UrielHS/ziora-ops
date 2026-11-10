@@ -54,6 +54,26 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(c).toMatchObject({ nextAction: "Llamar", nextActionOn: "2026-11-20" }); // no pisa el que ya había
   });
 
+  it("marcar correo o teléfono incorrecto deja la fecha y una nota; desmarcar la quita", async () => {
+    const { db } = await import("@/db");
+    const { contactActivities, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { setChannelInvalid } = await import("./leads");
+    const t = Date.now();
+    const { id } = await upsertContact(db, { name: "Mal Dato", email: `mal${t}@example.com`, phone: "55 1234 5678", source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    await setChannelInvalid(db, id, "email", true, actor);
+    await setChannelInvalid(db, id, "phone", true, actor);
+    let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.emailInvalidAt).toBeInstanceOf(Date);
+    expect(c.phoneInvalidAt).toBeInstanceOf(Date);
+    expect(c.email).toBe(`mal${t}@example.com`); // el dato no se borra
+    await setChannelInvalid(db, id, "email", false, actor);
+    [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.emailInvalidAt).toBeNull();
+    const acts = (await db.select().from(contactActivities).where(eq(contactActivities.contactId, id))).map((x) => x.summary);
+    expect(acts).toEqual(expect.arrayContaining(["Marcó el correo como incorrecto", "Marcó el teléfono como incorrecto", "Marcó el correo como válido otra vez"]));
+  });
+
   it("«ya lo está probando» pasa a en_trial y no retrocede a quien ya paga", async () => {
     const { db } = await import("@/db");
     const { contacts } = await import("@/db/schema");

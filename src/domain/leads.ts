@@ -117,6 +117,16 @@ export async function markReplied(db: Dbx, contactId: string, actor: Actor, summ
   });
 }
 
+/** Correo o teléfono incorrecto: se marca (no se borra) para que nadie, ni la cadencia, lo vuelva a usar. `invalid=false` lo desmarca. */
+export async function setChannelInvalid(db: Dbx, contactId: string, channel: "email" | "phone", invalid: boolean, actor: Actor, now = new Date()): Promise<void> {
+  const col = channel === "email" ? "emailInvalidAt" : "phoneInvalidAt";
+  const label = channel === "email" ? "el correo" : "el teléfono";
+  await db.transaction(async (tx) => {
+    await tx.update(contacts).set({ [col]: invalid ? now : null }).where(eq(contacts.id, contactId));
+    await logActivity(tx, { contactId, type: "nota", actor, summary: invalid ? `Marcó ${label} como incorrecto` : `Marcó ${label} como válido otra vez`, meta: { kind: "channel_invalid", channel, invalid }, occurredAt: now });
+  });
+}
+
 /** «Le mandé mi liga»: nota saliente (meta.kind = referral_link). Si el lead no tenía siguiente paso, lo pone a 2 días: ver si ya se registró. */
 export async function recordReferralLinkSent(db: Dbx, contactId: string, actor: Actor, now = new Date()): Promise<void> {
   await db.transaction(async (tx) => {

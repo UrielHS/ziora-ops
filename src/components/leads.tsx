@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightLeft, CalendarClock, Cog, FlaskConical, Link2, Mail, MapPin, Megaphone, MessageCircle, Phone, StickyNote, Users, Video } from "lucide-react";
-import { addNoteAction, markRepliedAction, markTryingAction, moveLead, postponeAction, recordTouchAction, referralLinkSentAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
+import { addNoteAction, markRepliedAction, markTryingAction, moveLead, postponeAction, recordTouchAction, referralLinkSentAction, setChannelInvalidAction, setLeadStatusAction, setNextActionAction } from "@/actions/leads";
 import { enrollAction, stopEnrollmentAction } from "@/actions/sequences";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
@@ -44,6 +44,7 @@ export function LeadCard({ c, owner, selectable = true }: { c: Lead; owner?: str
       <div className="flex flex-wrap items-center gap-1.5">
         <LeadPriorityBadge priority={c.priority} />
         {c.segment && <Badge tone="gray">{c.segment}</Badge>}
+        <InvalidBadges c={c} />
       </div>
       {c.nextAction && (
         <p className={cn("flex items-center gap-1 text-[11px]", overdue ? "font-semibold text-danger" : "text-muted")}>
@@ -104,6 +105,31 @@ export function TouchButtons({ id }: { id: string }) {
         <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
       </ActionForm>
     </div>
+  );
+}
+
+/** Badges rojos cuando el correo o el teléfono están marcados como incorrectos. */
+export function InvalidBadges({ c }: { c: { emailInvalidAt?: Date | null; phoneInvalidAt?: Date | null } }) {
+  return (
+    <>
+      {c.emailInvalidAt && <Badge tone="red">Correo incorrecto</Badge>}
+      {c.phoneInvalidAt && <Badge tone="red">Teléfono incorrecto</Badge>}
+    </>
+  );
+}
+
+/** Ficha → Datos de contacto: alterna el marcado de correo o teléfono incorrecto. */
+export function ChannelInvalidButton({ id, channel, invalid }: { id: string; channel: "email" | "phone"; invalid: boolean }) {
+  const label = channel === "email" ? "Correo" : "Teléfono";
+  return (
+    <ActionForm action={setChannelInvalidAction} className="contents">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="channel" value={channel} />
+      <input type="hidden" name="invalid" value={invalid ? "0" : "1"} />
+      <Submit variant={invalid ? "secondary" : "ghost"} className="!py-1 !text-xs">
+        {invalid ? `${label}: marcar como válido` : `${label} incorrecto`}
+      </Submit>
+    </ActionForm>
   );
 }
 
@@ -247,6 +273,7 @@ export function TodayRow({ c, owner, message, wa, cadence }: { c: Lead; owner?: 
         <LeadPriorityBadge priority={c.priority} />
         <LeadStatusBadge status={c.leadStatus} />
         <CadenceBadge cadence={cadence} />
+        <InvalidBadges c={c} />
         {c.jobTitle && <span className="text-xs text-muted">{c.jobTitle}</span>}
         <span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><Avatar name={owner} size={18} />{owner ?? "Sin dueño"}</span>
       </div>
@@ -265,7 +292,7 @@ export function TodayRow({ c, owner, message, wa, cadence }: { c: Lead; owner?: 
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <WhatsAppButton href={wa}>WhatsApp</WhatsAppButton>
+            {!c.phoneInvalidAt && <WhatsAppButton href={wa}>WhatsApp</WhatsAppButton>}
             <ActionForm action={recordTouchAction} className="contents">
               <input type="hidden" name="id" value={c.id} />
               <input type="hidden" name="channel" value="whatsapp" />

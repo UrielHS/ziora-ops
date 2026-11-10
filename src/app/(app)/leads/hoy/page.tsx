@@ -34,7 +34,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
     const cad = cadence.get(c.id);
     // Si la secuencia dejó un WhatsApp listo, el enlace de WhatsApp lleva ese texto.
     const message = cad?.status === "activa" && cad.pendingText ? cad.pendingText : defaultMessage(c, access.user.name);
-    return <TodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} message={message} wa={waMessageLink(c.phoneE164, message)} cadence={cad} />;
+    return <TodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} message={message} wa={c.phoneInvalidAt ? null : waMessageLink(c.phoneE164, message)} cadence={cad} />;
   };
 
   return (

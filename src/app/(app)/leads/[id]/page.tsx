@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
 import { convertToAccountAction } from "@/actions/leads";
 import { ActionForm, Submit } from "@/components/ui/form";
-import { CadencePanel, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, MyLinks, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
+import { CadencePanel, ChannelInvalidButton, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, MyLinks, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
@@ -130,8 +130,8 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           <Card>
             <PanelHeader title="Datos de contacto" />
             <dl className="grid grid-cols-1 gap-x-4 gap-y-2 px-5 pb-5 text-sm sm:grid-cols-2">
-              <div><dt className="label">Correo</dt><dd className="flex items-center gap-2 break-all">{c.email ?? "—"}{c.email && <CopyButton text={c.email} />}</dd></div>
-              <div><dt className="label">Teléfono</dt><dd className="flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-muted" />{c.phone ?? "—"}{c.phoneE164 && <span className="text-xs text-faint">· +{c.phoneE164}</span>}{(c.phoneE164 || c.phone) && <CopyButton text={c.phoneE164 ? `+${c.phoneE164}` : c.phone!} />}</dd></div>
+              <div><dt className="label">Correo</dt><dd className="flex flex-wrap items-center gap-2 break-all">{c.email ?? "—"}{c.email && <CopyButton text={c.email} />}{c.emailInvalidAt && <Badge tone="red">Incorrecto</Badge>}</dd></div>
+              <div><dt className="label">Teléfono</dt><dd className="flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-muted" />{c.phone ?? "—"}{c.phoneE164 && <span className="text-xs text-faint">· +{c.phoneE164}</span>}{(c.phoneE164 || c.phone) && <CopyButton text={c.phoneE164 ? `+${c.phoneE164}` : c.phone!} />}{c.phoneInvalidAt && <Badge tone="red">Incorrecto</Badge>}</dd></div>
               {profile.map(([k, v]) => <div key={k}><dt className="label">{k}</dt><dd>{v}</dd></div>)}
             </dl>
             <div className="flex flex-wrap gap-2 px-5 pb-5">
@@ -143,6 +143,13 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                   : <Badge key={ch} tone="gray">{label}: sin permiso</Badge>;
               })}
             </div>
+            {canManage && (c.email || c.phone) && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3">
+                <span className="text-xs text-muted">¿Dato malo? Márcalo y nadie (ni la cadencia) lo vuelve a usar:</span>
+                {c.email && <ChannelInvalidButton id={c.id} channel="email" invalid={!!c.emailInvalidAt} />}
+                {c.phone && <ChannelInvalidButton id={c.id} channel="phone" invalid={!!c.phoneInvalidAt} />}
+              </div>
+            )}
             {c.notes && <p className="px-5 pb-5 text-sm text-muted">{c.notes}</p>}
           </Card>
 

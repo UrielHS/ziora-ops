@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { leadStatusEnum } from "@/db/schema";
 import {
-  assignOwner, convertLeadToAccount, logActivity, markReplied, markTrying, recordReferralLinkSent, recordTouch, setLeadStatus, setNextAction, setPriority, type Actor,
+  assignOwner, convertLeadToAccount, logActivity, markReplied, markTrying, recordReferralLinkSent, recordTouch, setChannelInvalid, setLeadStatus, setNextAction, setPriority, type Actor,
 } from "@/domain/leads";
 import { completePendingTouch, enroll, enrollMessage } from "@/domain/sequences";
 import { formAction, type ActionState } from "@/lib/action";
@@ -63,6 +63,12 @@ const _referralLinkSent = formAction(z.object({ id }), async (d) => {
   await recordReferralLinkSent(db, d.id, await actor());
   refresh(d.id);
   return "Liga registrada";
+});
+
+const _setChannelInvalid = formAction(z.object({ id, channel: z.enum(["email", "phone"]), invalid: z.enum(["1", "0"]) }), async (d) => {
+  await setChannelInvalid(db, d.id, d.channel, d.invalid === "1", await actor());
+  refresh(d.id);
+  return d.invalid === "1" ? "Marcado como incorrecto: nadie lo volverá a usar" : "Marcado como válido otra vez";
 });
 
 const _markTrying = formAction(z.object({ id }), async (d) => {
@@ -146,6 +152,7 @@ export async function recordTouchAction(prev: ActionState, fd: FormData) { retur
 export async function markRepliedAction(prev: ActionState, fd: FormData) { return _markReplied(prev, fd); }
 export async function referralLinkSentAction(prev: ActionState, fd: FormData) { return _referralLinkSent(prev, fd); }
 export async function markTryingAction(prev: ActionState, fd: FormData) { return _markTrying(prev, fd); }
+export async function setChannelInvalidAction(prev: ActionState, fd: FormData) { return _setChannelInvalid(prev, fd); }
 export async function setNextActionAction(prev: ActionState, fd: FormData) { return _setNextAction(prev, fd); }
 export async function postponeAction(prev: ActionState, fd: FormData) { return _postpone(prev, fd); }
 export async function assignOwnerAction(prev: ActionState, fd: FormData) { return _assignOwner(prev, fd); }

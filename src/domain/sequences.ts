@@ -226,7 +226,7 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
 
     if (step.channel === "email") {
       const tpl = step.emailTemplateId ? ctx.templates.get(step.emailTemplateId) : undefined;
-      const why = !ctx.contact.email ? "sin correo" : !ctx.consent.email ? "sin permiso de correo" : !tpl ? "sin plantilla" : null;
+      const why = !ctx.contact.email ? "sin correo" : ctx.contact.emailInvalidAt ? "correo marcado incorrecto" : !ctx.consent.email ? "sin permiso de correo" : !tpl ? "sin plantilla" : null;
       if (why) {
         await skipStep(db, e, step, why);
         r.skipped++;
@@ -268,7 +268,7 @@ async function processEnrollment(db: Dbx, start: SequenceEnrollment, ctx: Ctx, n
     }
 
     // WhatsApp: no se envía, se deja listo para el dueño.
-    const why = !ctx.contact.phoneE164 ? "sin teléfono" : !ctx.consent.whatsapp ? "sin permiso de WhatsApp" : !step.whatsappText ? "sin texto" : null;
+    const why = !ctx.contact.phoneE164 ? "sin teléfono" : ctx.contact.phoneInvalidAt ? "teléfono marcado incorrecto" : !ctx.consent.whatsapp ? "sin permiso de WhatsApp" : !step.whatsappText ? "sin texto" : null;
     if (why) {
       await skipStep(db, e, step, why);
       r.skipped++;

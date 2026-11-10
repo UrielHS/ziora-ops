@@ -220,6 +220,29 @@ describe.runIf(enabled)("cadencia: enrolar y correr", () => {
     expect(s.sent[0].emails[0].replyTo).toBe(s.owner.email);
   });
 
+  it("correo marcado incorrecto: el paso de correo se omite y sigue; teléfono marcado: el WhatsApp se omite", async () => {
+    const s = await setup();
+    const { seq } = await s.mkSequence();
+    const a = await s.mkLead();
+    const b = await s.mkLead();
+    await s.db.update(s.schema.contacts).set({ emailInvalidAt: NOW }).where(eq(s.schema.contacts.id, a.id));
+    await s.db.update(s.schema.contacts).set({ phoneInvalidAt: NOW }).where(eq(s.schema.contacts.id, b.id));
+    await s.seqMod.enroll(s.db, [a.id, b.id], seq.id, s.actor, NOW);
+    const r1 = await s.run();
+    expect(s.sent.flatMap((x) => x.emails).some((m) => m.to === a.email)).toBe(false);
+    expect(s.sent.flatMap((x) => x.emails).some((m) => m.to === b.email)).toBe(true);
+    expect(r1.skipped).toBeGreaterThanOrEqual(1);
+    const ea = await s.enrollment(a.id);
+    expect(ea.currentStep).toBe(2);
+    expect((await s.activities(a.id)).some((x) => x.summary === "Paso 1 de correo omitido: correo marcado incorrecto")).toBe(true);
+    // día 3: a b le tocaría el WhatsApp, pero su teléfono está marcado
+    await s.run({ now: new Date(NOW.getTime() + 3 * DAY) });
+    const eb = await s.enrollment(b.id);
+    expect(eb.pendingText).toBeNull();
+    expect(eb.currentStep).toBe(3);
+    expect((await s.activities(b.id)).some((x) => x.summary === "Paso 2 de WhatsApp omitido: teléfono marcado incorrecto")).toBe(true);
+  });
+
   it("una respuesta detiene la secuencia antes del siguiente paso", async () => {
     const s = await setup();
     const { seq } = await s.mkSequence();
