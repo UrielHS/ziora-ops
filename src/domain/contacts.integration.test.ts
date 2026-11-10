@@ -125,17 +125,19 @@ describe.runIf(enabled)("edición manual del contacto", () => {
     const { setChannelInvalid } = await import("./leads");
     const actor = { userId: null, label: "Prueba" };
     const t = Date.now();
-    const { id } = await upsertContact(db, { name: "Tel Malo", email: `telmalo${t}@example.com`, phone: "55 1234 5678", source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    const tel = `55 ${String(t).slice(-8)}`;
+    const tel2 = String(t + 1).slice(-8);
+    const { id } = await upsertContact(db, { name: "Tel Malo", email: `telmalo${t}@example.com`, phone: tel, source: "manual", tags: ["lead"], leadStatus: "nuevo" });
     await setChannelInvalid(db, id, "phone", true, actor);
 
-    await editContact(db, id, { name: "Tel Malo", phone: "55 1234 5678" }, ["lead"], actor);
+    await editContact(db, id, { name: "Tel Malo", phone: tel }, ["lead"], actor);
     let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
     expect(c.phoneInvalidAt).toBeInstanceOf(Date); // mismo número: sigue marcado
 
-    await editContact(db, id, { name: "Tel Malo", phone: "+52 55 9876 5432" }, ["lead"], actor);
+    await editContact(db, id, { name: "Tel Malo", phone: `+52 55 ${tel2}` }, ["lead"], actor);
     [c] = await db.select().from(contacts).where(eq(contacts.id, id));
     expect(c.phoneInvalidAt).toBeNull();
-    expect(c.phoneE164).toBe("525598765432");
+    expect(c.phoneE164).toBe(`5255${tel2}`);
     const acts = (await db.select().from(contactActivities).where(eq(contactActivities.contactId, id))).map((x) => x.summary);
     expect(acts).toContain("Corrigió el teléfono; deja de estar marcado como incorrecto");
   });

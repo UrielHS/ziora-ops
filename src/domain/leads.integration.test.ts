@@ -60,7 +60,7 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     const { upsertContact } = await import("./contacts");
     const { setChannelInvalid } = await import("./leads");
     const t = Date.now();
-    const { id } = await upsertContact(db, { name: "Mal Dato", email: `mal${t}@example.com`, phone: "55 1234 5678", source: "manual", tags: ["lead"], leadStatus: "nuevo" });
+    const { id } = await upsertContact(db, { name: "Mal Dato", email: `mal${t}@example.com`, phone: `55 ${String(t).slice(-8)}`, source: "manual", tags: ["lead"], leadStatus: "nuevo" });
     await setChannelInvalid(db, id, "email", true, actor);
     await setChannelInvalid(db, id, "phone", true, actor);
     let [c] = await db.select().from(contacts).where(eq(contacts.id, id));
