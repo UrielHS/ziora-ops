@@ -94,6 +94,40 @@ export function summarizeByPlan(users: UserLike[], prices: Price[], now: Date) {
   });
 }
 
+/** Cómo paga hoy una cuenta, según lo que mandó la app desde Stripe. */
+export type PayState = "paying" | "courtesy" | "trial" | "cancelled" | "none";
+
+/**
+ * paying = factura pagada > 0 (o plan de pago sin dato real); courtesy = suscripción activa que paga 0
+ * (cupón del 100 %, Pro otorgado a mano); trial = en prueba; cancelled = cancelada o con pago fallido;
+ * none = sin suscripción (plan gratis o Pro sin Stripe).
+ */
+export function payState(u: PayLike, prices: Price[]): PayState {
+  if (/trial/i.test(u.status)) return "trial";
+  if (u.status === "free") return "none";
+  if (CANCELLED.test(u.status)) return "cancelled";
+  if (isPaying(u, prices)) return "paying";
+  return realMrr(u) === 0 ? "courtesy" : "none";
+}
+
+// Dominios de correo desechable vistos en registros de prueba.
+const DISPOSABLE_DOMAINS = new Set(["ebflyai.com", "mailinator.com", "yopmail.com", "guerrillamail.com", "10minutemail.com", "temp-mail.org", "tempmail.com", "sharklasers.com"]);
+const INTERNAL_DOMAIN = "ziora-copilot.com";
+// Alias con "+" que el equipo usa para probar: +test, +dev, +qa, +demo, +prueba, +staging, +t1, +l2, +j2, +dev12…
+const TEST_PLUS_TAG = /\+(test|dev|qa|demo|prueba|staging|stg|tmp|[a-z]{1,2}\d{1,3})(\d*)?([._-]|$)/i;
+
+/** Cuenta que huele a prueba o interna: dominio de Ziora, correo desechable o alias "+test"-style. */
+export function looksLikeTestAccount(email: string) {
+  const e = email.trim().toLowerCase();
+  const at = e.lastIndexOf("@");
+  if (at < 0) return false;
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (domain === INTERNAL_DOMAIN || domain.endsWith(`.${INTERNAL_DOMAIN}`)) return true;
+  if (DISPOSABLE_DOMAINS.has(domain)) return true;
+  return TEST_PLUS_TAG.test(local);
+}
+
 export type FollowupReason = "paying_inactive" | "trial_ending";
 
 /** A quién conviene llamar: clientes de pago sin entrar 7+ días y trials que vencen en 4 días o menos. */
@@ -111,12 +145,12 @@ export function followupCandidates<T extends UserLike & { trialEndsAt: Date | nu
 
 const mxDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City" }).format(d);
 
-/** Aplica un snapshot completo: upsert, marca bajas y guarda la foto diaria por plan. */
 /** Marca o desmarca una cuenta como de prueba. Se conserva entre sincronizaciones. */
 export async function setAppUserTest(db: Db, uid: string, isTest: boolean) {
   await db.update(appUsers).set({ isTest }).where(eq(appUsers.uid, uid));
 }
 
+/** Aplica un snapshot completo: upsert, marca bajas y guarda la foto diaria por plan. */
 export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
   const toDate = (s?: string | null) => (s ? new Date(s) : null);
   const rows = snap.users.map((u) => ({
@@ -126,6 +160,7 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
     billingPeriod: u.billingPeriod ?? null, mrrCents: u.mrrAmount == null ? null : Math.round(u.mrrAmount * 100),
     currency: u.currency ?? null, currentPeriodEnd: toDate(u.currentPeriodEnd), cancelAtPeriodEnd: u.cancelAtPeriodEnd ?? false,
     referredByCode: u.referredByCode ?? null,
+    isTest: looksLikeTestAccount(u.email),
     syncedAt: now, removedAt: null,
   }));
 
@@ -141,6 +176,8 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
           currentPeriodEnd: sql`excluded.current_period_end`, cancelAtPeriodEnd: sql`excluded.cancel_at_period_end`,
           // La atribución es permanente en la app: si el snapshot no trae código (o trae null), se conserva el que había.
           referredByCode: sql`coalesce(excluded.referred_by_code, app_users.referred_by_code)`,
+          // La marca de prueba solo sube: la pone el equipo o la detección por correo, y nadie la quita al sincronizar.
+          isTest: sql`app_users.is_test or excluded.is_test`,
           syncedAt: sql`excluded.synced_at`, removedAt: sql`null`,
         },
       });

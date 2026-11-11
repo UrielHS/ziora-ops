@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
-import { Activity, CircleDollarSign, HeartPulse, Users } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, CircleDollarSign, HeartPulse, Users } from "lucide-react";
 import { savePlanPrice } from "@/actions/followups";
 import { markAppUserTest } from "@/actions/app-users";
 import { NewFollowupButton } from "@/components/followups";
@@ -9,7 +9,7 @@ import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
 import { appUserDaily, appUsers, followups, planPrices } from "@/db/schema";
-import { ACTIVE_DAYS, estimatedMrr, isActive, isPaying, realMrr, summarizeByPlan } from "@/domain/app-users";
+import { ACTIVE_DAYS, estimatedMrr, isActive, isPaying, payState, realMrr, summarizeByPlan, type PayState } from "@/domain/app-users";
 import { fmtDate, money, relative } from "@/lib/format";
 import { BILLING_PERIOD, HEALTH } from "@/lib/labels";
 import { can } from "@/lib/permissions";
@@ -24,13 +24,27 @@ const STATUS_LABELS: Record<string, string> = {
   incomplete: "Pago incompleto", incomplete_expired: "Pago vencido", canceled: "Cancelada", cancelled: "Cancelada", free: "Gratis",
 };
 const statusLabel = (s: string) => STATUS_LABELS[s.toLowerCase()] ?? s;
+// Columnas ordenables (?orden=…&dir=asc|desc). Los nulos (nunca entró, sin pago) van al final en ambos sentidos.
+const SORT = {
+  terapeuta: appUsers.name, plan: appUsers.plan, estado: appUsers.status, registro: appUsers.signedUpAt,
+  ultima: appUsers.lastActiveAt, pacientes: appUsers.patientCount, sesiones: appUsers.sessionsLast30d, pago: appUsers.mrrCents,
+} as const;
+type SortKey = keyof typeof SORT;
+const DEFAULT_SORT: SortKey = "ultima";
+const isSortKey = (k: string | undefined): k is SortKey => !!k && k in SORT;
+
+const PAY: Record<PayState, { label: string; tone: "green" | "amber" | "gray" | "red" }> = {
+  paying: { label: "Paga", tone: "green" }, courtesy: { label: "Cortesía", tone: "amber" }, trial: { label: "Prueba", tone: "amber" },
+  cancelled: { label: "Cancelada", tone: "red" }, none: { label: "Sin suscripción", tone: "gray" },
+};
+
 function statusTone(s: string, active: boolean) {
   if (/cancel|expired/i.test(s)) return "red" as const;
   if (/past_due|unpaid|incomplete|trial/i.test(s)) return "amber" as const;
   return active ? "green" as const : "gray" as const;
 }
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; plan?: string; estado?: string; p?: string }> }) {
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; plan?: string; estado?: string; p?: string; orden?: string; dir?: string }> }) {
   const sp = await searchParams;
   const access = await requirePagePermission("customers.view");
   const showRevenue = can(access, "revenue.view");
@@ -38,6 +52,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const now = new Date();
   const activeSince = new Date(now.getTime() - ACTIVE_DAYS * 86400000);
   const page = Math.max(0, Number(sp.p ?? 0) || 0);
+  const sortKey: SortKey = isSortKey(sp.orden) ? sp.orden : DEFAULT_SORT;
+  // Por defecto, números y fechas de mayor a menor; texto de la A a la Z.
+  const textSort = sortKey === "terapeuta" || sortKey === "plan" || sortKey === "estado";
+  const dir: "asc" | "desc" = sp.dir === "asc" || sp.dir === "desc" ? sp.dir : textSort ? "asc" : "desc";
+  const orderBy = dir === "asc" ? sql`${SORT[sortKey]} asc nulls last` : sql`${SORT[sortKey]} desc nulls last`;
 
   const where: SQL[] = [];
   // Las cuentas de prueba solo se ven al pedirlas; en todo lo demás no existen.
@@ -49,11 +68,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   if (sp.plan) where.push(eq(appUsers.plan, sp.plan));
   if (sp.q) where.push(or(ilike(appUsers.email, `%${sp.q}%`), ilike(appUsers.name, `%${sp.q}%`))!);
 
-  const [users, team, prices, rows, [{ total }], trend, [lastSync], lastHealth] = await Promise.all([
+  const [users, team, prices, rows, [{ total }], trend, [lastSync], lastHealth, [{ hiddenTest }]] = await Promise.all([
     db.select().from(appUsers).where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false))),
     listUsers(),
     db.select().from(planPrices).orderBy(asc(planPrices.plan)),
-    db.select().from(appUsers).where(and(...where)).orderBy(desc(appUsers.lastActiveAt)).limit(PAGE).offset(page * PAGE),
+    db.select().from(appUsers).where(and(...where)).orderBy(orderBy, asc(appUsers.email)).limit(PAGE).offset(page * PAGE),
     db.select({ total: sql<number>`count(*)::int` }).from(appUsers).where(and(...where)),
     db.select({
       day: appUserDaily.day, users: sql<number>`sum(${appUserDaily.users})::int`, active: sql<number>`sum(${appUserDaily.active})::int`,
@@ -63,11 +82,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     db.selectDistinctOn([followups.appUserUid], { uid: followups.appUserUid, health: followups.health })
       .from(followups).where(and(eq(followups.status, "done"), isNotNull(followups.health), isNotNull(followups.appUserUid)))
       .orderBy(followups.appUserUid, desc(followups.completedAt)),
+    db.select({ hiddenTest: sql<number>`count(*)::int` }).from(appUsers).where(and(eq(appUsers.isTest, true), isNull(appUsers.removedAt))),
   ]);
 
   const byPlan = summarizeByPlan(users, prices, now);
   const active = users.filter((u) => isActive(u.lastActiveAt, now)).length;
   const paying = users.filter((u) => isPaying(u, prices)).length;
+  const courtesy = users.filter((u) => payState(u, prices) === "courtesy").length;
   const patients = users.reduce((s, u) => s + u.patientCount, 0);
   const plansSeen = [...new Set([...users.map((u) => u.plan), ...prices.map((p) => p.plan)])].sort();
   const withReal = users.filter((u) => realMrr(u) !== null).length;
@@ -78,8 +99,21 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     : withReal ? `Stripe en ${withReal} cuentas; el resto plan × precio` : "Plan × precio; falta conectar pagos";
   const maxTrend = Math.max(1, ...trend.map((t) => t.users));
   const qs = (patch: Record<string, string | undefined>) => {
-    const p = new URLSearchParams(Object.entries({ q: sp.q, plan: sp.plan, estado: sp.estado, ...patch }).filter(([, v]) => v) as [string, string][]);
+    const p = new URLSearchParams(Object.entries({ q: sp.q, plan: sp.plan, estado: sp.estado, orden: sp.orden, dir: sp.dir, ...patch }).filter(([, v]) => v) as [string, string][]);
     return `/customers?${p}`;
+  };
+  // Encabezado ordenable: primer clic ordena por esa columna (sentido por defecto), el segundo invierte.
+  const Th = ({ k, children, align }: { k: SortKey; children: React.ReactNode; align?: "right" }) => {
+    const on = sortKey === k;
+    const nextDir = on ? (dir === "asc" ? "desc" : "asc") : undefined;
+    const Icon = on ? (dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+    return (
+      <th className={cn("px-2 font-semibold", align === "right" && "text-right", k === "terapeuta" && "px-5 py-2")}>
+        <Link href={qs({ orden: k, dir: nextDir, p: undefined })} aria-sort={on ? (dir === "asc" ? "ascending" : "descending") : "none"} className={cn("inline-flex items-center gap-1 hover:text-ink", on && "text-ink")}>
+          {children}<Icon className={cn("h-3 w-3", on ? "text-emerald" : "text-faint")} />
+        </Link>
+      </th>
+    );
   };
 
   if (!lastSync?.at) {
@@ -96,12 +130,12 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <PageHeader
         eyebrow="Clientes"
         title="Usuarios de Ziora"
-        subtitle={`Sincronizado ${relative(lastSync.at)} · activo = entró en los últimos ${ACTIVE_DAYS} días · de los pacientes solo se guarda el número`}
+        subtitle={`Sincronizado ${relative(lastSync.at)} · activo = entró en los últimos ${ACTIVE_DAYS} días · de los pacientes solo se guarda el número${hiddenTest ? ` · ${hiddenTest} cuentas de prueba ocultas` : ""}`}
         actions={showRevenue && <PricesButton plans={plansSeen} prices={prices} />}
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Usuarios" value={users.length} note={`${paying} de pago`} icon={Users} />
+        <Kpi label="Usuarios" value={users.length} note={`${paying} pagan en Stripe${courtesy ? ` · ${courtesy} de cortesía` : ""}`} icon={Users} />
         <Kpi label="Activos" value={`${users.length ? Math.round((active / users.length) * 100) : 0}%`} note={`${active} entraron en ${ACTIVE_DAYS} días`} icon={Activity} />
         <Kpi label="Pacientes registrados" value={patients.toLocaleString("es-MX")} note={`${users.length ? (patients / users.length).toFixed(1) : 0} por terapeuta`} icon={HeartPulse} />
         {showRevenue
@@ -151,21 +185,28 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           <span className="ml-auto text-xs text-faint">{total} usuarios</span>
         </form>
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[960px] text-sm">
             <thead><tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-faint">
-              <th className="px-5 py-2 font-semibold">Terapeuta</th><th className="px-2 font-semibold">Plan</th><th className="px-2 font-semibold">Estado</th>
-              <th className="px-2 font-semibold">Última vez</th><th className="px-2 text-right font-semibold">Pacientes</th><th className="px-2 text-right font-semibold">Sesiones 30d</th>
+              <Th k="terapeuta">Terapeuta</Th><Th k="plan">Plan</Th><Th k="estado">Estado</Th><Th k="pago">Pago</Th>
+              <Th k="registro">Registro</Th><Th k="ultima">Última vez</Th><Th k="pacientes" align="right">Pacientes</Th><Th k="sesiones" align="right">Sesiones 30d</Th>
               <th className="px-2 font-semibold">Salud</th><th className="px-5" />
             </tr></thead>
             <tbody>
               {rows.map((u) => {
                 const health = lastHealth.find((h) => h.uid === u.uid)?.health;
                 const act = isActive(u.lastActiveAt, now);
+                const pay = payState(u, prices);
+                const real = realMrr(u);
                 return (
                   <tr key={u.uid} className="border-b border-[#EFEDE6] last:border-b-0">
                     <td className="px-5 py-2.5"><span className="block font-semibold">{u.name ?? "—"}</span><span className="block text-xs text-muted">{u.email}</span></td>
                     <td className="px-2">{prices.find((p) => p.plan === u.plan)?.label ?? u.plan}</td>
                     <td className="px-2">{u.removedAt ? <Badge tone="gray">Baja</Badge> : <Badge tone={statusTone(u.status, act)}>{statusLabel(u.status)}{u.cancelAtPeriodEnd && !/cancel/i.test(u.status) ? " · cancela al cierre" : ""}{!act && !/cancel/i.test(u.status) ? " · inactivo" : ""}</Badge>}</td>
+                    <td className="px-2">
+                      <Badge tone={PAY[pay].tone}>{PAY[pay].label}</Badge>
+                      {pay === "paying" && real !== null && <span className="ml-1.5 text-xs text-muted">{money(real)}/mes</span>}
+                    </td>
+                    <td className="px-2 text-muted">{u.signedUpAt ? fmtDate(u.signedUpAt, { day: "numeric", month: "short", year: "2-digit" }) : "—"}</td>
                     <td className="px-2 text-muted">{u.lastActiveAt ? relative(u.lastActiveAt) : "Nunca"}</td>
                     <td className="px-2 text-right font-semibold">{u.patientCount}</td>
                     <td className="px-2 text-right">{u.sessionsLast30d}</td>
@@ -183,7 +224,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={8} className="px-5 py-6 text-center text-muted">Sin resultados.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={10} className="px-5 py-6 text-center text-muted">Sin resultados.</td></tr>}
             </tbody>
           </table>
         </div>

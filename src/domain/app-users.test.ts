@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimatedMrr, followupCandidates, isActive, isPaying, realMrr, Snapshot, summarizeByPlan } from "./app-users";
+import { estimatedMrr, followupCandidates, isActive, isPaying, looksLikeTestAccount, payState, realMrr, Snapshot, summarizeByPlan } from "./app-users";
 
 const now = new Date("2026-11-03T12:00:00Z");
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86400000);
@@ -83,5 +83,32 @@ describe("MRR real de Stripe", () => {
     // Pro otorgado a mano: sin suscripción en Stripe (status "free", mrrAmount null) no es de pago
     expect(isPaying({ plan: "pro", status: "free", mrrCents: null, currency: null }, prices)).toBe(false);
     expect(isPaying({ plan: "free", status: "active", mrrCents: 10000, currency: "mxn" }, prices)).toBe(true);
+  });
+});
+
+describe("estado de pago y cuentas de prueba", () => {
+  it("payState distingue pago real, cortesía, prueba, cancelada y sin suscripción", () => {
+    expect(payState({ plan: "pro", status: "active", mrrCents: 69900, currency: "mxn" }, prices)).toBe("paying");
+    expect(payState({ plan: "pro", status: "active", mrrCents: 0, currency: "mxn" }, prices)).toBe("courtesy");
+    expect(payState({ plan: "pro", status: "trialing", mrrCents: 0, currency: "mxn" }, prices)).toBe("trial");
+    expect(payState({ plan: "free", status: "canceled", mrrCents: 0, currency: "mxn" }, prices)).toBe("cancelled");
+    expect(payState({ plan: "pro", status: "unpaid", mrrCents: 69900, currency: "mxn" }, prices)).toBe("cancelled");
+    expect(payState({ plan: "pro", status: "free", mrrCents: null, currency: null }, prices)).toBe("none");
+    expect(payState({ plan: "free", status: "free", mrrCents: 0, currency: null }, prices)).toBe("none");
+    // Versión vieja de la app sin dato real: plan de pago cuenta como pago
+    expect(payState({ plan: "pro", status: "active" }, prices)).toBe("paying");
+  });
+  it("looksLikeTestAccount: dominio de Ziora, correos desechables y alias +test", () => {
+    expect(looksLikeTestAccount("chris+test01@ziora-copilot.com")).toBe(true);
+    expect(looksLikeTestAccount("Eurídice@Ziora-Copilot.com")).toBe(true);
+    expect(looksLikeTestAccount("lagomap496@ebflyai.com")).toBe(true);
+    expect(looksLikeTestAccount("chris+j2@gmail.com")).toBe(true);
+    expect(looksLikeTestAccount("chris+dev12@gmail.com")).toBe(true);
+    expect(looksLikeTestAccount("alguien+prueba@gmail.com")).toBe(true);
+    expect(looksLikeTestAccount("psic.agape@gmail.com")).toBe(false);
+    expect(looksLikeTestAccount("rafacv2000@gmail.com")).toBe(false);
+    expect(looksLikeTestAccount("maria+consultorio@gmail.com")).toBe(false);
+    expect(looksLikeTestAccount("0250002@up.edu.mx")).toBe(false);
+    expect(looksLikeTestAccount("sin-arroba")).toBe(false);
   });
 });
