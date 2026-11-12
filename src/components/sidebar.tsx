@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, Funnel, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Menu, Settings, Target, Ticket, Users, Video, X,
+  BarChart3, BookOpen, Building2, Bug, ChevronDown, HeartPulse, PhoneCall, CalendarDays, ClipboardCheck, Lightbulb, CheckSquare, FileCode2, Funnel, GitPullRequest, LayoutDashboard, LineChart, Link2, Mail, Megaphone, Menu, Send, Settings, Target, Ticket, Users, Video, X,
 } from "lucide-react";
 import { Avatar, cn } from "@/components/ui";
 import { can, type Access, type Permission } from "@/lib/permissions";
@@ -46,6 +46,10 @@ function useNav(counts: Record<string, number>, access: Access) {
       { href: "/campaigns", label: "Correo masivo", icon: Mail, perm: "content.manage" },
       { href: "/templates", label: "Plantillas", icon: FileCode2, perm: "content.manage" },
       { href: "/events", label: "Eventos", icon: CalendarDays, shared: true },
+      { href: "/communities/publicar", label: "Publicar en grupos", icon: Send, perm: "communities.operate" },
+      { href: "/communities", label: "Comunidades", icon: Users, perm: "communities.operate" },
+      { href: "/communities/posts", label: "Mis posts", icon: Megaphone, perm: "communities.operate" },
+      { href: "/communities/mensajes", label: "Mensajes base", icon: FileCode2, perm: "communities.operate" },
     ] },
     { label: "Producto", items: [
       { href: "/tickets", label: "Tickets", icon: Ticket, count: counts.tickets },
