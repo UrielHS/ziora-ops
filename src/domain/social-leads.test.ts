@@ -8,6 +8,10 @@ describe("social-leads", () => {
       expect(normalizeHandle(raw)).toBe("psic.ana_01");
     }
   });
+  it("normalizeHandle no truena con un % mal formado", () => {
+    expect(normalizeHandle("https://www.instagram.com/%E0%A4%A")).toBeNull();
+    expect(normalizeHandle("instagram.com/%zz")).toBeNull();
+  });
   it("normalizeHandle rechaza lo que no es un usuario", () => {
     for (const raw of [null, undefined, "", "   ", "@", "con espacio", "a".repeat(31), "https://www.instagram.com/", "https://facebook.com/alguien", "ñandú"]) {
       expect(normalizeHandle(raw)).toBeNull();

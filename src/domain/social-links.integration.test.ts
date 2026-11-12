@@ -145,6 +145,18 @@ describe.runIf(enabled)("registro de la app ligado al lead de redes", () => {
     expect((await acts(db, lead.id)).length).toBe(1);
   });
 
+  it("una cuenta borrada no reclama el lead", async () => {
+    const { db, lead, link, t } = await mk();
+    const { linkSocialSignups } = await import("./social-links");
+    const { appUsers } = await import("@/db/schema");
+    const base = { plan: "free", status: "free", syncedAt: new Date(), attribution: { utm_medium: "redes", utm_term: link.code } };
+    await db.insert(appUsers).values({ ...base, uid: `del-${t}`, email: `del-${t}@example.com`, signedUpAt: new Date(Date.now() - 7200_000), removedAt: new Date() });
+    await linkSocialSignups(db);
+    expect((await row(db, lead.id)).appUserUid).toBeNull();
+    const [au] = await db.select().from(appUsers).where(eq(appUsers.uid, `del-${t}`));
+    expect(au.socialLinkId).toBeNull();
+  });
+
   it("una cuenta de prueba no gasta la liga", async () => {
     const { db, lead, link, t } = await mk();
     const { applySnapshot } = await import("./app-users");
@@ -258,6 +270,17 @@ describe.runIf(enabled)("captura suave de /comunidad con UTM de redes", () => {
     const c = (await db.select().from(contacts).where(eq(contacts.id, lead.id)))[0];
     expect(c.email).toBe(`ana${t}@example.com`);
     expect((await activities(db, lead.id)).some((a) => a.summary === "Dejó su correo en la página de invitación")).toBe(true);
+  });
+
+  it("una invitación reenviada no pisa el correo que el lead ya tenía", async () => {
+    const { db, lead, link, t } = await mk();
+    const { ingestSocialCapture } = await import("./social-links");
+    const { contacts } = await import("@/db/schema");
+    await db.update(contacts).set({ email: `orig${t}@example.com` }).where(eq(contacts.id, lead.id));
+    await ingestSocialCapture(db, { fullName: "Intruso", email: `intruso${t}@example.com`, utm: { utm_medium: "redes", utm_term: link.code } });
+    const c = (await db.select().from(contacts).where(eq(contacts.id, lead.id)))[0];
+    expect(c.email).toBe(`orig${t}@example.com`);
+    expect(c.details).toMatchObject({ correo_alterno: `intruso${t}@example.com` });
   });
 
   it("si el correo ya es de otro contacto, no se fusiona y queda actividad en los dos", async () => {

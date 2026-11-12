@@ -33,6 +33,17 @@ describe("SocialPanel", () => {
     const html = render(<SocialPanel c={lead} dm={{ key: "RI1", step: 1, text: null }} inviteUrl={url} promoUrl={null} canManage />);
     expect(html).toContain("Este mensaje aún no está aprobado por dirección");
     expect(html).not.toContain("Copiar mensaje y abrir perfil");
+    expect(html).not.toContain("Le escribí");
+  });
+  it("si ya respondió no hay mensaje de DM, ni «Le escribí» ni «Respondió»", () => {
+    const replied = { ...lead, leadStatus: "respondio" } as typeof lead;
+    for (const el of [<SocialPanel key="p" c={replied} dm={null} inviteUrl={url} promoUrl={null} canManage />, <SocialTodayRow key="r" c={replied} owner="Ale" dm={null} canManage />]) {
+      const html = render(el);
+      expect(html).toContain("ya respondió o salió del seguimiento");
+      expect(html).not.toContain("Le escribí");
+      expect(html).not.toContain("Ya se mandaron los tres mensajes");
+      expect(html).not.toMatch(/<button[^>]*>Respondió</);
+    }
   });
   it("tras tres mensajes ya no ofrece «Le escribí»", () => {
     const html = render(<SocialPanel c={lead} dm={null} inviteUrl={url} promoUrl={null} canManage />);

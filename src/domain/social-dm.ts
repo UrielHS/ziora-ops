@@ -3,6 +3,7 @@ import type { Db, Dbx } from "@/db";
 import { baseMessages, contactActivities, contacts } from "@/db/schema";
 import { advanceLead, logActivity, type Actor } from "./leads";
 import type { SocialLeadType, SocialPlatform } from "./social-leads";
+import { DM_NEXT_ACTIONS, dmOpen } from "./social-shared";
 
 /** Llaves de los mensajes de DM por tipo de lead y paso (1 = primer contacto, 2 = a los 4 días, 3 = a los 7). */
 export const DM_KEYS = {
@@ -23,17 +24,18 @@ export function renderDm(body: string, v: { nombre: string; yo: string; liga: st
 }
 
 /** Ajusta una fila de contacts a lo que pide `dmFor` (la columna admite plataformas que no son de DM). */
-export function dmLead(c: { name: string; socialLeadType: SocialLeadType | null; socialPlatform: string | null }) {
-  return { name: c.name, socialLeadType: c.socialLeadType, socialPlatform: (c.socialPlatform === "instagram" || c.socialPlatform === "tiktok" ? c.socialPlatform : null) as SocialPlatform | null };
+export function dmLead(c: { name: string; socialLeadType: SocialLeadType | null; socialPlatform: string | null; leadStatus?: string | null }) {
+  return { name: c.name, leadStatus: c.leadStatus ?? null, socialLeadType: c.socialLeadType, socialPlatform: (c.socialPlatform === "instagram" || c.socialPlatform === "tiktok" ? c.socialPlatform : null) as SocialPlatform | null };
 }
 
-/** Mensaje que toca para este lead. `text: null` = ese mensaje no está aprobado; `null` = ya no hay más pasos. */
+/** Mensaje que toca para este lead. `text: null` = ese mensaje no está aprobado; `null` = ya no hay más pasos (o el lead ya no está sin respuesta). */
 export function dmFor(
-  lead: { name: string; socialLeadType: SocialLeadType | null; socialPlatform: SocialPlatform | null },
+  lead: { name: string; socialLeadType: SocialLeadType | null; socialPlatform: SocialPlatform | null; leadStatus?: string | null },
   sent: number,
   messages: { key: string; body: string; status: string }[],
   v: { yo: string; liga: string },
 ): { key: string; step: 1 | 2 | 3; text: string | null } | null {
+  if (!dmOpen(lead.leadStatus)) return null; // ya respondió, está en demo/trial/pago o se perdió: no más DMs
   const step = dmStep(sent);
   if (!step) return null;
   const key = DM_KEYS[lead.socialLeadType ?? "psicologo"][step - 1];
@@ -51,7 +53,7 @@ export { DM_DAILY_WARN } from "./social-shared";
 /** Dos «Le escribí» del mismo lead dentro de esta ventana se cuentan como uno (doble clic). */
 export const DM_DEDUP_SECONDS = 120;
 
-const NEXT_ACTION = ["Seguimiento 1 por DM", "Último seguimiento por DM", "Sin respuesta tras 3 mensajes: decidir si se marca perdido"] as const;
+const NEXT_ACTION = DM_NEXT_ACTIONS;
 const DM_KIND = sql`${contactActivities.meta}->>'kind' = 'social_dm'`;
 const cdmxDate = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }); // YYYY-MM-DD en CDMX
 
@@ -60,12 +62,14 @@ const cdmxDate = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "America
  * Una transacción con `for update` sobre el contacto ordena los envíos simultáneos; un segundo clic dentro de
  * DM_DEDUP_SECONDS no cuenta ni salta el paso (devuelve el paso ya registrado).
  */
-export async function recordDm(db: Db, contactId: string, actor: Actor, now = new Date()): Promise<{ recorded: boolean; step: 1 | 2 | 3 | null }> {
+export async function recordDm(db: Db, contactId: string, actor: Actor, now = new Date()): Promise<{ recorded: boolean; step: 1 | 2 | 3 | null; reason?: "status" }> {
   return db.transaction(async (tx) => {
-    const [c] = await tx.select({ platform: contacts.socialPlatform, handle: contacts.socialHandle, type: contacts.socialLeadType })
+    const [c] = await tx.select({ platform: contacts.socialPlatform, handle: contacts.socialHandle, type: contacts.socialLeadType, status: contacts.leadStatus })
       .from(contacts).where(eq(contacts.id, contactId)).limit(1).for("update");
     if (!c) throw new Error("El contacto no existe.");
     if (!c.handle || !c.platform) throw new Error("Este contacto no tiene usuario de redes.");
+    // Ya respondió (o salió del embudo): no se registra ni se programa seguimiento.
+    if (!dmOpen(c.status)) return { recorded: false, step: null, reason: "status" as const };
 
     const dms = await tx.select({ occurredAt: contactActivities.occurredAt, meta: contactActivities.meta })
       .from(contactActivities).where(and(eq(contactActivities.contactId, contactId), DM_KIND)).orderBy(desc(contactActivities.occurredAt));

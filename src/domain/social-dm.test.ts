@@ -13,4 +13,10 @@ describe("mensajes de DM", () => {
     expect(dmFor({ name: "Ana", socialLeadType: "psicologo", socialPlatform: "instagram" }, 0, msgs, { yo: "Ale", liga: "L" })!.text).toBe("P1 Instagram");
     expect(dmFor({ name: "Ana", socialLeadType: "psicologo", socialPlatform: "instagram" }, 3, msgs, { yo: "Ale", liga: "L" })).toBeNull();
   });
+  it("dmFor no da paso a quien ya respondió, está en demo/trial/pago o se perdió", () => {
+    const msgs = [{ key: "RP1", body: "P1", status: "aprobado" }];
+    const lead = (leadStatus: string | null) => ({ name: "Ana", socialLeadType: "psicologo" as const, socialPlatform: "instagram" as const, leadStatus });
+    for (const s of ["respondio", "demo_agendada", "en_trial", "pago", "perdido"]) expect(dmFor(lead(s), 0, msgs, { yo: "Ale", liga: "L" })).toBeNull();
+    for (const s of [null, "nuevo", "contactado"]) expect(dmFor(lead(s), 0, msgs, { yo: "Ale", liga: "L" })).toMatchObject({ key: "RP1", text: "P1" });
+  });
 });

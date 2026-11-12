@@ -70,13 +70,41 @@ describe.runIf(enabled)("«Le escribí»: registrar el DM", () => {
     expect((await state(db, lead.id)).dms).toHaveLength(3);
   });
 
-  it("no retrocede a quien ya respondió", async () => {
-    const { db, lead, actor } = await setup();
+  it("a quien ya respondió, entró a trial, pagó o se perdió no se le registra DM ni se le programa seguimiento", async () => {
     const { recordDm } = await import("./social-dm");
     const { contacts } = await import("@/db/schema");
-    await db.update(contacts).set({ leadStatus: "respondio" }).where(eq(contacts.id, lead.id));
-    await recordDm(db, lead.id, actor, new Date("2026-11-16T18:00:00Z"));
-    expect((await state(db, lead.id)).c.leadStatus).toBe("respondio");
+    for (const status of ["respondio", "en_trial", "pago", "perdido"] as const) {
+      const { db, lead, actor } = await setup();
+      await db.update(contacts).set({ leadStatus: status }).where(eq(contacts.id, lead.id));
+      expect(await recordDm(db, lead.id, actor, new Date("2026-11-16T18:00:00Z"))).toEqual({ recorded: false, step: null, reason: "status" });
+      const { c, dms } = await state(db, lead.id);
+      expect(c.leadStatus).toBe(status);
+      expect(c.nextAction).toBeNull();
+      expect(dms).toHaveLength(0);
+    }
+  });
+
+  it("al marcar «Respondió» o entrar a trial se quita el seguimiento por DM, pero no una acción puesta a mano", async () => {
+    const { recordDm } = await import("./social-dm");
+    const { markReplied, syncLeadStatusFromAppUsers } = await import("./leads");
+    const { contacts, appUsers } = await import("@/db/schema");
+    const a = await setup();
+    await recordDm(a.db, a.lead.id, a.actor, new Date("2026-11-16T18:00:00Z"));
+    expect((await state(a.db, a.lead.id)).c.nextAction).toBe("Seguimiento 1 por DM");
+    await markReplied(a.db, a.lead.id, a.actor);
+    expect(await state(a.db, a.lead.id)).toMatchObject({ c: { leadStatus: "respondio", nextAction: null, nextActionOn: null } });
+    const b = await setup();
+    await recordDm(b.db, b.lead.id, b.actor, new Date("2026-11-16T18:00:00Z"));
+    await b.db.update(contacts).set({ nextAction: "Llamar el jueves", nextActionOn: "2026-11-20" }).where(eq(contacts.id, b.lead.id));
+    await markReplied(b.db, b.lead.id, b.actor);
+    expect((await state(b.db, b.lead.id)).c).toMatchObject({ nextAction: "Llamar el jueves", nextActionOn: "2026-11-20" });
+    const c = await setup();
+    const email = `trial${Date.now()}@example.com`;
+    await c.db.update(contacts).set({ email }).where(eq(contacts.id, c.lead.id));
+    await recordDm(c.db, c.lead.id, c.actor, new Date("2026-11-16T18:00:00Z"));
+    await c.db.insert(appUsers).values({ uid: `dmtrial${Date.now()}`, email, plan: "pro", status: "trialing", syncedAt: new Date() });
+    await syncLeadStatusFromAppUsers(c.db);
+    expect(await state(c.db, c.lead.id)).toMatchObject({ c: { leadStatus: "en_trial", nextAction: null } });
   });
 
   it("dmsSentToday cuenta por persona y por día de CDMX", async () => {

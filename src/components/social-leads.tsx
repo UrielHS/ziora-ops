@@ -9,7 +9,7 @@ import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { CopyButton } from "@/components/ui/copy";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { contacts, InfluencerDeal } from "@/db/schema";
-import { canMoveStage, DM_DAILY_WARN, socialProfileUrl, usesZiora } from "@/domain/social-shared";
+import { canMoveStage, DM_DAILY_WARN, dmOpen, socialProfileUrl, usesZiora } from "@/domain/social-shared";
 import { fmtDate, todayISO } from "@/lib/format";
 import { DEAL_KIND, INFLUENCER_STAGE, SOCIAL_LEAD_TYPE, SOCIAL_PLATFORM, SOCIAL_TIER } from "@/lib/labels";
 import { LeadPriorityBadge, LeadStatusBadge } from "./leads";
@@ -54,10 +54,13 @@ export function OpenProfileButton({ url, text }: { url: string; text: string }) 
 function DmBlock({ c, dm, canManage, rows, noLink }: { c: Lead; dm: DmView; canManage: boolean; rows: number; noLink?: boolean }) {
   const url = profileUrl(c);
   // Sin liga el texto tendría un hueco: no se ofrece copiarlo ni registrar el DM.
-  const usable = !!dm && !noLink;
+  const usable = !!dm && !noLink && !!dm.text;
+  const open = dmOpen(c.leadStatus);
   return (
     <div className="flex flex-col gap-2">
-      {!dm ? (
+      {!dm && !open ? (
+        <p className="text-sm text-muted">Ya no hay mensajes por DM: el lead ya respondió o salió del seguimiento.</p>
+      ) : !dm ? (
         <p className="text-sm text-muted">Ya se mandaron los tres mensajes. Si no responde, márcalo perdido.</p>
       ) : (
         <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
@@ -83,10 +86,12 @@ function DmBlock({ c, dm, canManage, rows, noLink }: { c: Lead; dm: DmView; canM
               <Submit variant="secondary" className="!py-1.5 !text-xs">Le escribí</Submit>
             </ActionForm>
           )}
-          <ActionForm action={markRepliedAction} className="contents">
-            <input type="hidden" name="id" value={c.id} />
-            <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
-          </ActionForm>
+          {open && (
+            <ActionForm action={markRepliedAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
+            </ActionForm>
+          )}
         </div>
       )}
     </div>

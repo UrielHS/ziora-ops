@@ -21,6 +21,14 @@ describe("addContactChannelAction", () => {
     expect(add).not.toHaveBeenCalled();
   });
 
+  it("recorta espacios del correo antes de validar", async () => {
+    const { addContactChannelAction } = await import("./social-leads");
+    add.mockResolvedValueOnce({ ok: true, added: true, unreadablePhone: false, kept: [] });
+    const r = await addContactChannelAction({}, form({ id: ID, email: "  a@b.com  " }));
+    expect(r.error).toBeUndefined();
+    expect(add.mock.calls[0][2]).toEqual({ email: "a@b.com", phone: undefined });
+  });
+
   it("campo vacío = no enviado", async () => {
     const { addContactChannelAction } = await import("./social-leads");
     const r = await addContactChannelAction({}, form({ id: ID, email: "" }));
@@ -29,12 +37,14 @@ describe("addContactChannelAction", () => {
 
   it("responde según lo que pasó de verdad", async () => {
     const { addContactChannelAction } = await import("./social-leads");
-    add.mockResolvedValueOnce({ ok: true, added: true, unreadablePhone: false });
+    add.mockResolvedValueOnce({ ok: true, added: true, unreadablePhone: false, kept: [] });
     expect((await addContactChannelAction({}, form({ id: ID, email: "a@b.com" }))).message).toBe("Dato agregado");
-    add.mockResolvedValueOnce({ ok: true, added: false, unreadablePhone: false });
+    add.mockResolvedValueOnce({ ok: true, added: false, unreadablePhone: false, kept: [] });
     expect((await addContactChannelAction({}, form({ id: ID, email: "a@b.com" }))).message).toBe("Ya lo tenía");
-    add.mockResolvedValueOnce({ ok: true, added: false, unreadablePhone: true });
+    add.mockResolvedValueOnce({ ok: true, added: false, unreadablePhone: true, kept: [] });
     expect((await addContactChannelAction({}, form({ id: ID, phone: "abc" }))).error).toBe("No se pudo leer el teléfono");
+    add.mockResolvedValueOnce({ ok: true, added: false, unreadablePhone: false, kept: ["correo"] });
+    expect((await addContactChannelAction({}, form({ id: ID, email: "a@b.com" }))).message).toMatch(/Ya tenía otro correo/);
     add.mockResolvedValueOnce({ ok: false, takenBy: "x" });
     const r = await addContactChannelAction({}, form({ id: ID, email: "a@b.com" }));
     expect(r.error).toMatch(/otro contacto/);

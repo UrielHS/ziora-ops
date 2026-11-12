@@ -111,7 +111,11 @@ export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ li
   const pending = await db
     .select({ uid: appUsers.uid, email: appUsers.email, isTest: appUsers.isTest, code: sql<string>`${appUsers.attribution}->>'utm_term'` })
     .from(appUsers)
-    .where(and(isNull(appUsers.socialLinkId), isNotNull(appUsers.attribution), sql`${appUsers.attribution}->>'utm_term' is not null`))
+    .where(and(
+      isNull(appUsers.socialLinkId), isNull(appUsers.removedAt), isNotNull(appUsers.attribution),
+      // Solo códigos que pueden ser de redes (7 del alfabeto): los de comunidad (6) no se reescanean cada hora.
+      sql`${appUsers.attribution}->>'utm_term' ~ '^[abcdefghjkmnpqrstuvwxyz23456789]{7}$'`,
+    ))
     .orderBy(sql`${appUsers.signedUpAt} asc nulls last`, asc(appUsers.uid));
   const codes = [...new Set(pending.map((p) => p.code).filter((c) => SOCIAL_CODE_RE.test(c)))];
   if (!codes.length) return { linked: 0, attributed: 0, failed: 0 };

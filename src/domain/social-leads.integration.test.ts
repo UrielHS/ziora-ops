@@ -71,14 +71,32 @@ describe.runIf(enabled)("leads de redes: identidad por plataforma y usuario", ()
     const lead = await upsertContact(db, { name: "L", source: "instagram", tags: [], social: { platform: "instagram", handle: h } });
     const otroEmail = `otro${t}@example.com`;
     const otro = await upsertContact(db, { name: "O", email: otroEmail, source: "manual", tags: [] });
-    expect(await addContactChannel(db, lead.id, { email: `Nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: true, unreadablePhone: false });
-    expect(await addContactChannel(db, lead.id, { email: `nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: false, unreadablePhone: false });
-    expect(await addContactChannel(db, lead.id, { phone: "abc" }, actor)).toEqual({ ok: true, added: false, unreadablePhone: true });
+    expect(await addContactChannel(db, lead.id, { email: `Nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: true, unreadablePhone: false, kept: [] });
+    expect(await addContactChannel(db, lead.id, { email: `nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: false, unreadablePhone: false, kept: [] });
+    expect(await addContactChannel(db, lead.id, { phone: "abc" }, actor)).toEqual({ ok: true, added: false, unreadablePhone: true, kept: [] });
     expect(await addContactChannel(db, lead.id, { email: otroEmail }, actor)).toEqual({ ok: false, takenBy: otro.id });
     const [c] = await db.select().from(contacts).where(eq(contacts.id, lead.id));
     expect(c.email).toBe(`nuevo${t}@example.com`);
     const [o] = await db.select().from(contacts).where(eq(contacts.id, otro.id));
     expect(o.email).toBe(otroEmail);
+  });
+
+  it("addContactChannel no pisa el correo ni el teléfono que el lead ya tenía: los anota como alternos", async () => {
+    const { db, t, h, actor } = await setup();
+    const { upsertContact } = await import("./contacts");
+    const { addContactChannel } = await import("./social-leads");
+    const { contacts, contactActivities } = await import("@/db/schema");
+    const d4 = String(Math.floor(Math.random() * 9000) + 1000);
+    const lead = await upsertContact(db, { name: "L", source: "instagram", tags: [], email: `orig${t}@example.com`, phone: `+52 55 ${d4}1234`, social: { platform: "instagram", handle: h } });
+    const [before] = await db.select().from(contacts).where(eq(contacts.id, lead.id));
+    const r = await addContactChannel(db, lead.id, { email: `Nuevo${t}@example.com`, phone: `+52 55 ${d4}4321` }, actor);
+    expect(r).toEqual({ ok: true, added: false, unreadablePhone: false, kept: ["correo", "teléfono"] });
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, lead.id));
+    expect(c.email).toBe(`orig${t}@example.com`);
+    expect(c.phoneE164).toBe(before.phoneE164);
+    expect(c.details).toMatchObject({ correo_alterno: `nuevo${t}@example.com`, telefono_alterno: `5255${d4}4321` });
+    const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, lead.id));
+    expect(acts.some((a) => (a.meta as { kind?: string }).kind === "channel_alternate")).toBe(true);
   });
 
   it("setSocialLeadType cambia el tipo", async () => {

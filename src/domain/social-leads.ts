@@ -1,4 +1,4 @@
-import { and, eq, ilike, isNull } from "drizzle-orm";
+import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
 import { contacts, type ContactTag } from "@/db/schema";
 import { parseCsv } from "./marketing";
@@ -27,7 +27,7 @@ export function normalizeHandle(raw: string | null | undefined): string | null {
     let url: URL;
     try { url = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`); } catch { return null; }
     if (!SOCIAL_HOST_RE.test(url.hostname.toLowerCase())) return null;
-    s = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? "");
+    try { s = decodeURIComponent(url.pathname.split("/").filter(Boolean)[0] ?? ""); } catch { return null; }
   }
   s = s.replace(/^@+/, "").replace(/\/+$/, "").toLowerCase();
   return HANDLE_RE.test(s) ? s : null;
@@ -38,29 +38,44 @@ export { socialProfileUrl };
 /**
  * Agrega correo y/o teléfono a un lead que hasta ahora solo tenía su @. No fusiona contactos:
  * si el correo o el teléfono ya es de otro contacto no toca nada y dice de quién es.
+ * Solo llena un correo/teléfono VACÍO: si el lead ya tiene otro distinto no lo pisa; el nuevo queda en
+ * details.correo_alterno / telefono_alterno y en la actividad, y `kept` lo avisa.
  */
 export async function addContactChannel(
   db: Dbx, contactId: string, ch: { email?: string; phone?: string }, actor: Actor,
-): Promise<{ ok: true; added: boolean; unreadablePhone: boolean } | { ok: false; takenBy: string }> {
+): Promise<{ ok: true; added: boolean; unreadablePhone: boolean; kept: ("correo" | "teléfono")[] } | { ok: false; takenBy: string }> {
   const email = ch.email?.trim() ? ch.email.trim().toLowerCase() : null;
   const phoneE164 = normalizePhoneE164(ch.phone);
   const set: Partial<typeof contacts.$inferInsert> = {};
   const added: string[] = [];
+  const kept: ("correo" | "teléfono")[] = [];
+  const alterno: Record<string, string> = {};
+  const [cur] = await db.select({ email: contacts.email, phoneE164: contacts.phoneE164 }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
   if (email) {
     const [o] = await db.select({ id: contacts.id }).from(contacts).where(eq(contacts.email, email)).limit(1);
     if (o && o.id !== contactId) return { ok: false, takenBy: o.id };
-    if (!o) { set.email = email; added.push("correo"); }
+    if (!o) {
+      if (!cur?.email) { set.email = email; added.push("correo"); }
+      else if (cur.email.toLowerCase() !== email) { kept.push("correo"); alterno.correo_alterno = email; }
+    }
   }
   if (phoneE164) {
     const [o] = await db.select({ id: contacts.id }).from(contacts).where(eq(contacts.phoneE164, phoneE164)).limit(1);
     if (o && o.id !== contactId) return { ok: false, takenBy: o.id };
-    if (!o) { set.phone = ch.phone!.trim(); set.phoneE164 = phoneE164; set.phoneInvalidAt = null; added.push("teléfono"); }
+    if (!o) {
+      if (!cur?.phoneE164) { set.phone = ch.phone!.trim(); set.phoneE164 = phoneE164; set.phoneInvalidAt = null; added.push("teléfono"); }
+      else if (cur.phoneE164 !== phoneE164) { kept.push("teléfono"); alterno.telefono_alterno = phoneE164; }
+    }
   }
   const unreadablePhone = !!ch.phone?.trim() && !phoneE164;
-  if (!added.length) return { ok: true, added: false, unreadablePhone };
+  if (kept.length) {
+    await db.update(contacts).set({ details: sql`${contacts.details} || ${JSON.stringify(alterno)}::jsonb` }).where(eq(contacts.id, contactId));
+    await logActivity(db, { contactId, type: "sistema", actor, summary: `Dejó otro ${kept.join(" y otro ")}; se conserva el que ya tenía`, meta: { kind: "channel_alternate", channels: kept, ...alterno } });
+  }
+  if (!added.length) return { ok: true, added: false, unreadablePhone, kept };
   await db.update(contacts).set(set).where(eq(contacts.id, contactId));
   await logActivity(db, { contactId, type: "sistema", actor, summary: `Se agregó ${added.join(" y ")} al lead`, meta: { kind: "channel_added", channels: added } });
-  return { ok: true, added: true, unreadablePhone };
+  return { ok: true, added: true, unreadablePhone, kept };
 }
 
 export async function setSocialLeadType(db: Dbx, contactId: string, type: SocialLeadType, actor: Actor): Promise<void> {

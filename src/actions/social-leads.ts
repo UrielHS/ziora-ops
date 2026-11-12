@@ -28,17 +28,19 @@ const _recordDm = formAction(z.object({ id }), async (d) => {
   const r = await recordDm(db, d.id, await actor());
   refresh(d.id);
   if (r.recorded) return `DM ${r.step} registrado`;
+  if (r.reason === "status") return "Este lead ya respondió o salió del seguimiento: no se registró el DM";
   return r.step ? `El DM ${r.step} ya estaba registrado` : "Ya se mandaron los 3 mensajes";
 });
 
 /** Agrega correo y/o teléfono a un lead que solo tenía su @. */
 const _addContactChannel = formAction(
-  z.object({ id, email: z.email("correo válido").max(200).optional(), phone: z.string().trim().max(40).optional() }),
+  z.object({ id, email: z.string().trim().pipe(z.email("correo válido").max(200)).optional(), phone: z.string().trim().max(40).optional() }),
   async (d) => {
     if (!d.email && !d.phone) throw new Error("Escribe un correo o un teléfono");
     const r = await addContactChannel(db, d.id, { email: d.email, phone: d.phone }, await actor());
     if (!r.ok) throw new Error("Ese correo o teléfono ya es de otro contacto.");
     refresh(d.id);
+    if (r.kept.length) return `Ya tenía otro ${r.kept.join(" y otro ")}; lo anoté como alterno`;
     if (r.added) return r.unreadablePhone ? "Correo agregado; no se pudo leer el teléfono" : "Dato agregado";
     if (r.unreadablePhone) throw new Error("No se pudo leer el teléfono");
     return "Ya lo tenía";

@@ -10,6 +10,7 @@ import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
 import { fmtDateTime } from "@/lib/format";
 import { inNoCardTrial, isPaying } from "./app-users";
 import type { Cadence } from "./sequences";
+import { DM_NEXT_ACTIONS } from "./social-shared";
 
 /** Orden del embudo. `perdido` no está: es terminal y solo se pone a mano (o por baja). */
 export const LEAD_ORDER: LeadStatus[] = ["nuevo", "contactado", "respondio", "demo_agendada", "en_trial", "pago"];
@@ -75,13 +76,19 @@ export async function stopActiveEnrollments(db: Dbx, contactId: string, reason: 
 /** A partir de respondió el lead ya no está en cadencia. */
 const stopsCadence = (to: LeadStatus) => to === "perdido" || LEAD_ORDER.indexOf(to) >= LEAD_ORDER.indexOf("respondio");
 
+/** Quita el seguimiento por DM programado (solo esos textos; una acción puesta a mano se respeta). */
+async function clearDmNextAction(db: Dbx, contactId: string): Promise<void> {
+  await db.update(contacts).set({ nextAction: null, nextActionOn: null })
+    .where(and(eq(contacts.id, contactId), inArray(contacts.nextAction, [...DM_NEXT_ACTIONS])));
+}
+
 /** Avance automático (sync, webhook, toque): solo si es hacia adelante. Devuelve si cambió. */
 export async function advanceLead(db: Dbx, contactId: string, to: LeadStatus, actor: Actor, meta: Record<string, unknown> = {}): Promise<boolean> {
   return db.transaction(async (tx) => {
     const [c] = await tx.select({ leadStatus: contacts.leadStatus }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
     if (!c || !isForward(c.leadStatus, to)) return false;
     await changeStatus(tx, contactId, c.leadStatus, to, actor, meta);
-    if (stopsCadence(to)) await stopActiveEnrollments(tx, contactId, to);
+    if (stopsCadence(to)) { await stopActiveEnrollments(tx, contactId, to); await clearDmNextAction(tx, contactId); }
     return true;
   });
 }
@@ -95,7 +102,7 @@ export async function setLeadStatus(db: Dbx, contactId: string, to: LeadStatus, 
     if (!c) throw new Error("El contacto no existe.");
     if (c.leadStatus === to && to !== "perdido") return;
     await changeStatus(tx, contactId, c.leadStatus, to, actor, {}, lostReason);
-    if (stopsCadence(to)) await stopActiveEnrollments(tx, contactId, lostReason === "baja" ? "baja" : to);
+    if (stopsCadence(to)) { await stopActiveEnrollments(tx, contactId, lostReason === "baja" ? "baja" : to); await clearDmNextAction(tx, contactId); }
   });
 }
 
