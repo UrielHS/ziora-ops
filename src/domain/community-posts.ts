@@ -71,6 +71,23 @@ export async function campaignSeatsUsed(db: Db, slug: string): Promise<number> {
   return r?.n ?? 0;
 }
 
+/** Elegibilidad de una publicadora en un grupo ahora mismo: membresía propia e intervalo contando a todas las publicadoras. */
+export async function eligibilityFor(
+  db: Db,
+  community: { id: string; kind: CommunityKind; status: string; promoPolicy: PromoPolicy },
+  publisherId: string | null,
+  now: Date = new Date(),
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const [m] = publisherId
+    ? await db.select({ status: communityMemberships.status }).from(communityMemberships)
+        .where(and(eq(communityMemberships.communityId, community.id), eq(communityMemberships.userId, publisherId))).limit(1)
+    : [];
+  const [last] = await db.select({ at: communityPosts.publishedAt }).from(communityPosts)
+    .where(and(eq(communityPosts.communityId, community.id), eq(communityPosts.status, "publicado")))
+    .orderBy(desc(communityPosts.publishedAt)).limit(1);
+  return postEligibility(community, m?.status ?? null, last?.at ?? null, now);
+}
+
 export async function createPost(
   db: Db,
   input: { communityId: string; baseMessageKey: string; publisherId: string },
@@ -89,13 +106,7 @@ export async function createPost(
   const [publisher] = await db.select({ name: users.name }).from(users).where(eq(users.id, input.publisherId)).limit(1);
   if (!publisher) throw new Error("Publicadora no encontrada");
 
-  const [m] = await db.select({ status: communityMemberships.status }).from(communityMemberships)
-    .where(and(eq(communityMemberships.communityId, community.id), eq(communityMemberships.userId, input.publisherId))).limit(1);
-  // El intervalo cuenta a todas las publicadoras del grupo.
-  const [last] = await db.select({ at: communityPosts.publishedAt }).from(communityPosts)
-    .where(and(eq(communityPosts.communityId, community.id), eq(communityPosts.status, "publicado")))
-    .orderBy(desc(communityPosts.publishedAt)).limit(1);
-  const elig = postEligibility(community, m?.status ?? null, last?.at ?? null, now);
+  const elig = await eligibilityFor(db, community, input.publisherId, now);
   if (!elig.ok) throw new Error(elig.reason);
 
   if (message.key === SEAT_BASE_KEY && campaign.seatLimit != null && (await campaignSeatsUsed(db, campaign.slug)) >= campaign.seatLimit) {
@@ -138,6 +149,11 @@ export async function markPublished(db: Db, postId: string, opts: { postUrl?: st
   const p = await loadPost(db, postId);
   if (p.status !== "planeado" && p.status !== "espera_admin") throw new Error("Este post no se puede marcar como publicado");
   assertHasLink(p.code, p.finalText);
+  // Otra publicadora pudo publicar en el grupo (o cambiar la política o la membresía) después de que este post se generó.
+  const [community] = await db.select().from(communities).where(eq(communities.id, p.communityId)).limit(1);
+  if (!community) throw new Error("Comunidad no encontrada");
+  const elig = await eligibilityFor(db, community, p.publisherId, now);
+  if (!elig.ok) throw new Error(elig.reason);
   await db.update(communityPosts).set({ status: "publicado", publishedAt: now, postUrl: opts.postUrl?.trim() || null, updatedAt: now }).where(eq(communityPosts.id, postId));
   await db.update(communities).set({ status: "activa", updatedAt: now }).where(and(eq(communities.id, p.communityId), eq(communities.status, "aprobada")));
 }

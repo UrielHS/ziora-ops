@@ -18,7 +18,7 @@ export default async function PublishPage() {
       <PageHeader
         eyebrow="Marketing · Comunidades"
         title="Publicar"
-        subtitle={`Un clic copia el texto con tu liga y abre el grupo. Llevas ${v.publishedThisWeek} de ${WEEKLY_POSTS_PER_PUBLISHER} posts esta semana.`}
+        subtitle={`Un clic copia el texto con tu liga y abre el grupo. Llevas ${v.publishedThisWeek} de ${WEEKLY_POSTS_PER_PUBLISHER} posts en los últimos 7 días.`}
         actions={<Link href="/communities" className={btn("ghost", "sm")}>Todas las comunidades</Link>}
       />
 
@@ -55,7 +55,7 @@ export default async function PublishPage() {
         <PanelHeader title="3 · Responder" subtitle="Tus posts de los últimos 7 días. Si alguien responde con interés, regístralo aquí." />
         <div className="px-5 pb-5 pt-3">
           {v.toReply.length === 0 ? (
-            <p className={EMPTY}>Aún no tienes posts publicados esta semana.</p>
+            <p className={EMPTY}>No has publicado posts en los últimos 7 días.</p>
           ) : (
             <ul className="flex flex-col gap-3">
               {v.toReply.map((p) => (

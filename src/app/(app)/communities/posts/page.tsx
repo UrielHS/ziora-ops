@@ -27,7 +27,7 @@ export default async function MyPostsPage() {
         actions={<Link href="/communities/publicar" className={btn("ghost", "sm")}>Publicar</Link>}
       />
       {rows.length === 0 ? (
-        <Empty title="Aún no tienes posts esta semana" text="Ve a Publicar para generar el primero." action={<Link href="/communities/publicar" className={btn("primary")}>Ir a publicar</Link>} />
+        <Empty title="No tienes posts en los últimos 7 días" text="Ve a Publicar para generar el primero." action={<Link href="/communities/publicar" className={btn("primary")}>Ir a publicar</Link>} />
       ) : (
         <div className="flex flex-col gap-3">
           {rows.map(({ p, name }) => <PostCard key={p.id} post={p} communityName={name} canDelete />)}

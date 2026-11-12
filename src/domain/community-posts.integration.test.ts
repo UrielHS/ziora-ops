@@ -133,6 +133,43 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     expect(sk).toMatchObject({ status: "omitido", skipReason: "Hoy no hubo tiempo" });
   });
 
+  it("si Ale publica en el grupo, el post planeado de Pau ya no se puede publicar y sale de su cola", async () => {
+    const { db, community, pau, ale } = await setup();
+    const { communities, communityMemberships, communityPosts } = await import("@/db/schema");
+    const { createPost, markPublished } = await import("./community-posts");
+    const { loadPublisherView, weeklyPostsUsed, assertWeeklyQuota, WEEKLY_POSTS_PER_PUBLISHER } = await import("./community-queue");
+    const pauPost = await createPost(db, { communityId: community.id, baseMessageKey: "M1", publisherId: pau }, actor);
+    const alePost = await createPost(db, { communityId: community.id, baseMessageKey: "M2", publisherId: ale }, actor);
+    expect((await loadPublisherView(db, pau)).queue.map((r) => r.community.id)).toContain(community.id);
+
+    await markPublished(db, alePost.id, {}, actor);
+
+    await expect(markPublished(db, pauPost.id, {}, actor)).rejects.toThrow(/Ya se publicó hace/);
+    const [still] = await db.select().from(communityPosts).where(eq(communityPosts.id, pauPost.id));
+    expect(still.status).toBe("planeado");
+    expect((await loadPublisherView(db, pau)).queue.map((r) => r.community.id)).not.toContain(community.id);
+
+    // También se revalida la política y la membresía al publicar.
+    const s = await setup();
+    const p = await createPost(s.db, { communityId: s.community.id, baseMessageKey: "M1", publisherId: s.pau }, actor);
+    await s.db.update(communities).set({ promoPolicy: "no" }).where(eq(communities.id, s.community.id));
+    await expect(markPublished(s.db, p.id, {}, actor)).rejects.toThrow(/promoción/);
+
+    // Cupo semanal del lado del servidor: planeados y publicados de los últimos 7 días cuentan.
+    const q = await setup();
+    for (let i = 0; i < WEEKLY_POSTS_PER_PUBLISHER; i++) {
+      const [other] = await q.db.insert(communities).values({
+        name: `Extra ${i} ${q.t}`, platform: "facebook", url: `https://fb.com/extra${i}${q.t}`, slug: `fb-extra-${i}-${q.t}`.slice(0, 60), status: "aprobada", promoPolicy: "si",
+      }).returning();
+      await q.db.insert(communityMemberships).values({ communityId: other.id, userId: q.pau, status: "unida" });
+      await assertWeeklyQuota(q.db, q.pau);
+      await createPost(q.db, { communityId: other.id, baseMessageKey: "M1", publisherId: q.pau }, actor);
+    }
+    expect(await weeklyPostsUsed(q.db, q.pau)).toBe(WEEKLY_POSTS_PER_PUBLISHER);
+    await expect(assertWeeklyQuota(q.db, q.pau)).rejects.toThrow(/últimos 7 días/);
+    await expect(assertWeeklyQuota(q.db, q.ale)).resolves.toBeUndefined();
+  });
+
   it("la semilla es idempotente", async () => {
     const { db } = await import("@/db");
     const { baseMessages, communityCampaigns } = await import("@/db/schema");

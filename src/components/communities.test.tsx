@@ -42,7 +42,7 @@ describe("generar post", () => {
     expect(reason).toBe("Registra primero la política de promoción");
     const html = renderToStaticMarkup(<GeneratePost communityId={base.id} keys={["M1", "M2"]} reason={reason} />);
     expect(html).toContain("Registra primero la política de promoción");
-    expect(html).toContain("disabled");
+    expect(html).toMatch(/<button[^>]*disabled/);
   });
   it("con política sí y membresía no hay motivo; sin membresía lo dice", () => {
     expect(postBlockReason({ ...c, promoPolicy: "si" }, "unida", null, new Date())).toBeNull();
@@ -91,28 +91,61 @@ describe("otros componentes", () => {
 });
 
 describe("copiar y abrir", () => {
-  it("copiar y abrir crea el post, copia texto con liga corta y abre el grupo", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    const open = vi.fn();
-    const prepare = vi.fn().mockResolvedValue({ ok: true, postId: base.id, text: `Hola ${LINK}`, url: "https://www.facebook.com/groups/1734077966820764" });
-    const r = await copyAndOpen(prepare, { writeText, open });
-    expect(r).toEqual({ ok: true, postId: base.id });
-    expect(prepare).toHaveBeenCalledOnce();
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("https://ziora-copilot.com/c/"));
-    expect(open).toHaveBeenCalledWith("https://www.facebook.com/groups/1734077966820764", "_blank", "noopener");
-  });
-  it("si no se puede preparar el post no copia ni abre nada", async () => {
-    const writeText = vi.fn(); const open = vi.fn();
-    const r = await copyAndOpen(async () => ({ ok: false, error: "Aún no eres miembro del grupo" }), { writeText, open });
-    expect(r).toEqual({ ok: false, error: "Aún no eres miembro del grupo" });
+  const deferred = () => { let resolve!: (v: unknown) => void; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const mkTab = () => ({ opener: "x" as unknown, location: { href: "about:blank" }, close: vi.fn() });
+  const ready = { ok: true as const, postId: base.id, text: `Hola ${LINK}`, url: "https://www.facebook.com/groups/1734077966820764" };
+
+  it("copiar y abrir crea el post, copia texto con liga corta y abre el grupo (con ClipboardItem)", async () => {
+    const tab = mkTab();
+    const d = deferred();
+    const order: string[] = [];
+    let copied: Promise<string> | null = null;
+    const prepare = vi.fn(() => { order.push("prepare"); return d.promise as Promise<typeof ready>; });
+    const openBlank = vi.fn(() => { order.push("open"); return tab; });
+    const writeFromPromise = vi.fn((t: Promise<string>) => { order.push("write"); copied = t; return t.then(() => undefined); });
+    const writeText = vi.fn();
+    const run = copyAndOpen(prepare, { openBlank, writeFromPromise, writeText });
+    // Antes de que responda el servidor (todavía dentro del gesto) la pestaña y el portapapeles ya están enlazados.
+    expect(order).toEqual(["open", "prepare", "write"]);
+    expect(tab.location.href).toBe("about:blank");
+    d.resolve(ready);
+    const r = await run;
+    expect(r).toEqual({ ok: true, postId: base.id, text: ready.text });
+    expect(await copied).toEqual(expect.stringContaining("https://ziora-copilot.com/c/"));
+    expect(tab.location.href).toBe("https://www.facebook.com/groups/1734077966820764");
+    expect(tab.opener).toBeNull();
     expect(writeText).not.toHaveBeenCalled();
-    expect(open).not.toHaveBeenCalled();
   });
-  it("si el portapapeles falla avisa y no abre el grupo", async () => {
-    const open = vi.fn();
-    const r = await copyAndOpen(async () => ({ ok: true, postId: "p", text: "t", url: "https://x" }), { writeText: () => Promise.reject(new Error("denied")), open });
+  it("sin ClipboardItem copia con writeText después de esperar y abre la pestaña que ya estaba abierta", async () => {
+    const tab = mkTab();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const openBlank = vi.fn(() => tab);
+    const r = await copyAndOpen(async () => ready, { openBlank, writeText });
+    expect(openBlank).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("https://ziora-copilot.com/c/"));
+    expect(r.ok).toBe(true);
+    expect(tab.location.href).toBe(ready.url);
+  });
+  it("si no se puede preparar el post cierra la pestaña y no copia ni navega", async () => {
+    const tab = mkTab();
+    const writeFromPromise = vi.fn((t: Promise<string>) => t.then(() => undefined));
+    const r = await copyAndOpen(async () => ({ ok: false, error: "Aún no eres miembro del grupo" }), { openBlank: () => tab, writeFromPromise, writeText: vi.fn() });
+    expect(r).toEqual({ ok: false, error: "Aún no eres miembro del grupo" });
+    expect(tab.close).toHaveBeenCalled();
+    expect(tab.location.href).toBe("about:blank");
+  });
+  it("si el portapapeles falla avisa, cierra la pestaña y no abre el grupo", async () => {
+    const tab = mkTab();
+    const r = await copyAndOpen(async () => ready, { openBlank: () => tab, writeText: () => Promise.reject(new Error("denied")) });
     expect(r.ok).toBe(false);
-    expect(open).not.toHaveBeenCalled();
+    expect(tab.close).toHaveBeenCalled();
+    expect(tab.location.href).toBe("about:blank");
+  });
+  it("si el navegador bloqueó la pestaña avisa que el texto ya está copiado", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const r = await copyAndOpen(async () => ready, { openBlank: () => null, writeText });
+    expect(writeText).toHaveBeenCalled();
+    expect(r).toEqual({ ok: false, error: expect.stringContaining("Abrir grupo") });
   });
 });
 
@@ -145,6 +178,10 @@ describe("cola de publicar", () => {
     expect(r.rows[0].defaultKey).toBe("M2");
     expect(buildPublishQueue(cands, keys, 3, now).rows.map((x) => x.community.name)).toEqual(["copiado"]);
   });
+  it("un post ya copiado sale de la cola si dejó de ser elegible (otra publicó hace poco)", () => {
+    const stale = mk("copiado", {}, 0, { postId: "p", code: "k7m2qx", text: "t", key: "M1" });
+    expect(buildPublishQueue([stale], keys, 0, now).rows).toEqual([]);
+  });
   it("el mensaje por defecto es el menos usado en ese grupo", () => {
     expect(leastUsedKey(["M1", "M2", "M3"], { M1: 2, M2: 0, M3: 1 })).toBe("M2");
     expect(leastUsedKey(["M1", "M2", "M3"], {})).toBe("M1");
@@ -154,7 +191,13 @@ describe("cola de publicar", () => {
     const html = renderToStaticMarkup(<PublishQueue rows={rows} messageKeys={keys} remaining={2} publishedThisWeek={0} quota={3} />);
     expect(html).toContain("Copiar y abrir grupo");
     expect(html).not.toContain("Marcar publicado");
+    const planned = buildPublishQueue([mk("a1", {}, 90, { postId: "p", code: "k7m2qx", text: `Hola ${LINK}`, key: "M1" })], keys, 0, now).rows;
+    const withPost = renderToStaticMarkup(<PublishQueue rows={planned} messageKeys={keys} remaining={2} publishedThisWeek={0} quota={3} />);
+    expect(withPost).toContain("Copiar texto"); // camino manual siempre disponible
+    expect(withPost).toContain(LINK);
+    expect(withPost).toMatch(/<a href="https:\/\/fb\.com\/a1" target="_blank" rel="noopener noreferrer"[^>]*>[^<]*(<svg[^>]*>.*?<\/svg>)? ?Abrir grupo/);
+    expect(withPost).toContain("Marcar publicado");
     const vacio = renderToStaticMarkup(<PublishQueue rows={[]} messageKeys={keys} remaining={0} publishedThisWeek={3} quota={3} />);
-    expect(vacio).toContain("Ya completaste tus 3 posts de la semana");
+    expect(vacio).toContain("Ya completaste tus 3 posts de los últimos 7 días");
   });
 });

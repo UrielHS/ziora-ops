@@ -146,7 +146,7 @@ export function GeneratePost({ communityId, keys, reason }: { communityId: strin
         <select name="baseMessageKey" disabled={!!reason} className={cn(inputCls.replace("w-full ", ""), "pr-8")}>
           {keys.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
-        <Submit className={reason ? "pointer-events-none" : undefined}><Send className="h-3.5 w-3.5" /> Generar post</Submit>
+        <Submit disabled={!!reason}><Send className="h-3.5 w-3.5" /> Generar post</Submit>
       </div>
       {reason && <p className="text-xs text-warn">{reason}</p>}
     </ActionForm>
@@ -265,7 +265,7 @@ export function AttributionPanel({ communityId, communityName, postCode, utm, re
 
 /** Botón «Copiar y abrir grupo»: crea el post, copia el texto con la liga corta y abre el grupo en pestaña nueva. */
 export function CopyAndOpenButton({ communityId, messageKey, onDone, label = "Copiar y abrir grupo" }: {
-  communityId: string; messageKey: string; onDone?: (postId: string) => void; label?: string;
+  communityId: string; messageKey: string; onDone?: (postId: string, text: string) => void; label?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -278,12 +278,16 @@ export function CopyAndOpenButton({ communityId, messageKey, onDone, label = "Co
         onClick={async () => {
           setBusy(true);
           setError(null);
+          // Todo lo que exige el gesto del clic (pestaña y portapapeles) arranca aquí, antes de esperar al servidor (iOS/Safari).
           const r = await copyAndOpen(() => prepareCopyAndOpenAction(communityId, messageKey), {
+            openBlank: () => window.open("about:blank", "_blank"),
+            writeFromPromise: typeof window.ClipboardItem !== "undefined"
+              ? (text) => navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })])
+              : undefined,
             writeText: (t) => navigator.clipboard.writeText(t),
-            open: (u, t, f) => window.open(u, t, f),
           });
           setBusy(false);
-          if (r.ok) onDone?.(r.postId); else setError(r.error);
+          if (r.ok) onDone?.(r.postId, r.text); else setError(r.error);
         }}
       >
         <Copy className="h-4 w-4" /> {busy ? "Preparando…" : label}
@@ -295,8 +299,8 @@ export function CopyAndOpenButton({ communityId, messageKey, onDone, label = "Co
 
 function PublishItem({ row, messageKeys }: { row: PublishRow; messageKeys: string[] }) {
   const [key, setKey] = useState(row.defaultKey);
-  const [copied, setCopied] = useState<string | null>(null);
-  const postId = copied ?? row.planned?.postId ?? null;
+  const [copied, setCopied] = useState<{ postId: string; text: string } | null>(null);
+  const post = copied ?? (row.planned ? { postId: row.planned.postId, text: row.planned.text } : null);
   const c = row.community;
   return (
     <li className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-4">
@@ -312,16 +316,27 @@ function PublishItem({ row, messageKeys }: { row: PublishRow; messageKeys: strin
             {messageKeys.map((k) => <option key={k} value={k}>{k}{(row.usage[k] ?? 0) > 0 ? ` · usado ${row.usage[k]}` : ""}</option>)}
           </select>
         </Field>
-        <CopyAndOpenButton communityId={c.id} messageKey={key} onDone={setCopied} />
+        <CopyAndOpenButton communityId={c.id} messageKey={key} onDone={(postId, text) => setCopied({ postId, text })} />
       </div>
-      {postId && (
-        <ActionForm action={markPublishedAction} className="flex flex-wrap items-end gap-2 rounded-xl bg-mint/50 p-3">
-          <input type="hidden" name="postId" value={postId} />
-          <Field label="¿Ya publicaste? Pega la URL del post (opcional)" className="min-w-56 flex-1">
-            <input name="postUrl" type="url" placeholder="https://" className={inputCls} />
-          </Field>
-          <Submit>Marcar publicado</Submit>
-        </ActionForm>
+      {post && (
+        <div className="flex flex-col gap-3 rounded-xl bg-mint/50 p-3">
+          <details>
+            <summary className="cursor-pointer text-xs font-semibold text-muted">Ver el texto copiado</summary>
+            <p className="mt-2 whitespace-pre-wrap rounded-xl bg-white p-3 text-sm">{post.text}</p>
+          </details>
+          {/* Camino manual siempre disponible, por si el navegador bloquea el portapapeles o la pestaña. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <CopyTextButton text={post.text} />
+            <a href={c.url} target="_blank" rel="noopener noreferrer" className={btn("ghost", "sm")}><ExternalLink className="h-3.5 w-3.5" /> Abrir grupo</a>
+          </div>
+          <ActionForm action={markPublishedAction} className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="postId" value={post.postId} />
+            <Field label="¿Ya publicaste? Pega la URL del post (opcional)" className="min-w-56 flex-1">
+              <input name="postUrl" type="url" placeholder="https://" className={inputCls} />
+            </Field>
+            <Submit>Marcar publicado</Submit>
+          </ActionForm>
+        </div>
       )}
     </li>
   );
@@ -335,7 +350,7 @@ export function PublishQueue({ rows, messageKeys, remaining, publishedThisWeek, 
     return (
       <p className="rounded-2xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">
         {remaining === 0 && publishedThisWeek >= quota
-          ? `Ya completaste tus ${quota} posts de la semana.`
+          ? `Ya completaste tus ${quota} posts de los últimos 7 días.`
           : "Ahora no hay grupos listos para publicar. Únete a más grupos o registra su política de promoción."}
       </p>
     );

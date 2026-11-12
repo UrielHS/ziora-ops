@@ -1,5 +1,5 @@
 /** Comunidades (Fase 1): lo que ve cada publicadora en /communities/publicar (cola de publicación, grupos por unirse, posts por atender). */
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { baseMessages, communities, communityMemberships, communityPosts, type Community } from "@/db/schema";
 import { postEligibility } from "./community-posts";
@@ -36,7 +36,8 @@ export function leastUsedKey(keys: string[], usage: Record<string, number>): str
 export function buildPublishQueue(
   candidates: QueueCandidate[], messageKeys: string[], publishedThisWeek: number, now: Date, quota = WEEKLY_POSTS_PER_PUBLISHER,
 ): { rows: PublishRow[]; remaining: number } {
-  const planned = candidates.filter((c) => c.planned && c.membership === "unida" && c.community.kind === "grupo");
+  // Un post ya copiado tampoco se ofrece si dejó de ser elegible (p. ej. otra publicadora publicó en el grupo entretanto).
+  const planned = candidates.filter((c) => c.planned && postEligibility(c.community, c.membership, c.lastPublishedAt, now).ok);
   const fresh = candidates.filter((c) => !c.planned && postEligibility(c.community, c.membership, c.lastPublishedAt, now).ok);
   fresh.sort((a, b) =>
     (PRIORITY_RANK[a.community.priority ?? ""] ?? 3) - (PRIORITY_RANK[b.community.priority ?? ""] ?? 3)
@@ -47,6 +48,26 @@ export function buildPublishQueue(
     ...c, defaultKey: c.planned?.key ?? leastUsedKey(messageKeys, c.usage),
   }));
   return { rows, remaining };
+}
+
+/** Posts que cuentan contra el cupo: publicados en los últimos 7 días + generados (planeados) en los últimos 7 días. */
+export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Date(), excludeCommunityId?: string): Promise<number> {
+  const weekAgo = new Date(now.getTime() - 7 * DAY);
+  const rows = await db.select({ communityId: communityPosts.communityId, status: communityPosts.status }).from(communityPosts)
+    .where(and(
+      eq(communityPosts.publisherId, userId),
+      or(
+        and(eq(communityPosts.status, "publicado"), gte(communityPosts.publishedAt, weekAgo)),
+        and(eq(communityPosts.status, "planeado"), gte(communityPosts.createdAt, weekAgo)),
+      ),
+    ));
+  return rows.filter((r) => !(r.status === "planeado" && r.communityId === excludeCommunityId)).length;
+}
+
+/** Cupo semanal del lado del servidor (la pantalla solo lo refleja). `replacingInCommunityId`: el planeado de ese grupo se va a reemplazar. */
+export async function assertWeeklyQuota(db: Db, userId: string, now: Date = new Date(), replacingInCommunityId?: string): Promise<void> {
+  const used = await weeklyPostsUsed(db, userId, now, replacingInCommunityId);
+  if (used >= WEEKLY_POSTS_PER_PUBLISHER) throw new Error(`Ya llegaste a tus ${WEEKLY_POSTS_PER_PUBLISHER} posts de los últimos 7 días`);
 }
 
 export type PublisherView = {

@@ -6,7 +6,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { baseMessages, communities, communityPosts } from "@/db/schema";
 import { createCommunity, DISCARD_REASONS, PLATFORMS, reviewCommunity, setMembership, setPromoPolicy, type CommunityPlatform } from "@/domain/communities";
-import { createPost, markDeletedByAdmin, markPublished, skipPost, updatePostText } from "@/domain/community-posts";
+import { createPost, eligibilityFor, markDeletedByAdmin, markPublished, skipPost, updatePostText } from "@/domain/community-posts";
+import { assertWeeklyQuota } from "@/domain/community-queue";
 import { registerInterested } from "@/domain/community-leads";
 import type { Actor } from "@/domain/leads";
 import { formAction, type ActionState } from "@/lib/action";
@@ -20,6 +21,13 @@ const messageKey = z.string().regex(/^M\d$/, "mensaje no válido");
 async function actor(): Promise<{ a: Actor; userId: string }> {
   const { user } = await requirePermission("communities.operate");
   return { a: { userId: user.id, label: user.name }, userId: user.id };
+}
+
+/** Editar, publicar u omitir un post es solo de quien lo generó. */
+async function assertOwnPost(postId: string, userId: string) {
+  const [p] = await db.select({ publisherId: communityPosts.publisherId }).from(communityPosts).where(eq(communityPosts.id, postId)).limit(1);
+  if (!p) throw new Error("Post no encontrado");
+  if (p.publisherId !== userId) throw new Error("Este post lo generó otra persona");
 }
 
 function refresh() {
@@ -66,27 +74,31 @@ const _policy = formAction(z.object({ communityId: id, policy, rulesText: z.stri
 
 const _createPost = formAction(z.object({ communityId: id, baseMessageKey: messageKey }), async (d) => {
   const { a, userId } = await actor();
+  await assertWeeklyQuota(db, userId);
   await createPost(db, { communityId: d.communityId, baseMessageKey: d.baseMessageKey, publisherId: userId }, a);
   refresh();
   return "Post generado";
 });
 
 const _updateText = formAction(z.object({ postId: id, text: z.string().trim().min(1, "falta el texto").max(6000) }), async (d) => {
-  const { a } = await actor();
+  const { a, userId } = await actor();
+  await assertOwnPost(d.postId, userId);
   await updatePostText(db, d.postId, d.text, a);
   refresh();
   return "Texto guardado";
 });
 
 const _published = formAction(z.object({ postId: id, postUrl: z.string().trim().max(500).optional() }), async (d) => {
-  const { a } = await actor();
+  const { a, userId } = await actor();
+  await assertOwnPost(d.postId, userId);
   await markPublished(db, d.postId, { postUrl: d.postUrl }, a);
   refresh();
   return "Post marcado como publicado";
 });
 
 const _skip = formAction(z.object({ postId: id, reason: z.string().trim().min(1, "indica el motivo").max(300) }), async (d) => {
-  const { a } = await actor();
+  const { a, userId } = await actor();
+  await assertOwnPost(d.postId, userId);
   await skipPost(db, d.postId, d.reason, a);
   refresh();
   return "Post omitido";
@@ -146,14 +158,23 @@ export async function prepareCopyAndOpenAction(communityId: string, key: string)
     const { a, userId } = await actor();
     const cid = id.parse(communityId);
     const baseMessageKey = messageKey.parse(key);
-    const [community] = await db.select({ url: communities.url }).from(communities).where(eq(communities.id, cid)).limit(1);
+    const [community] = await db.select().from(communities).where(eq(communities.id, cid)).limit(1);
     if (!community) return { ok: false, error: "Comunidad no encontrada" };
     const existing = await db.select({ p: communityPosts, key: baseMessages.key }).from(communityPosts)
       .leftJoin(baseMessages, eq(baseMessages.id, communityPosts.baseMessageId))
       .where(and(eq(communityPosts.communityId, cid), eq(communityPosts.publisherId, userId), eq(communityPosts.status, "planeado")));
     const same = existing.find((e) => e.key === baseMessageKey);
-    // Si cambió de mensaje se crea primero el nuevo (puede fallar) y solo entonces se omite el anterior.
-    const post = same?.p ?? (await createPost(db, { communityId: cid, baseMessageKey, publisherId: userId }, a));
+    let post;
+    if (same) {
+      // Reutilizar no salta las reglas: otra publicadora pudo publicar en el grupo desde que se generó.
+      const elig = await eligibilityFor(db, community, userId);
+      if (!elig.ok) return { ok: false, error: elig.reason };
+      post = same.p;
+    } else {
+      // Si cambió de mensaje se crea primero el nuevo (puede fallar) y solo entonces se omite el anterior.
+      await assertWeeklyQuota(db, userId, new Date(), cid);
+      post = await createPost(db, { communityId: cid, baseMessageKey, publisherId: userId }, a);
+    }
     for (const e of existing) if (e.p.id !== post.id) await skipPost(db, e.p.id, "Cambió de mensaje antes de publicar", a);
     refresh();
     return { ok: true, postId: post.id, text: post.finalText ?? "", url: community.url };
