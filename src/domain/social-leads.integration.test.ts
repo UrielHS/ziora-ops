@@ -89,4 +89,69 @@ describe.runIf(enabled)("leads de redes: identidad por plataforma y usuario", ()
     const [c] = await db.select().from(contacts).where(eq(contacts.id, a.id));
     expect(c.socialLeadType).toBe("influencer");
   });
+
+  async function importSetup() {
+    const base = await setup();
+    const { users } = await import("@/db/shared");
+    const mk = async (tag: string) => (await base.db.insert(users).values({ email: `${tag}-${base.t}@ziora.test`, name: tag, role: "operator", active: true }).returning({ id: users.id }))[0].id;
+    const { parseSocialCsv, importSocialLeads } = await import("./social-leads");
+    const h1 = `i1.${base.t}`.slice(0, 30), h2 = `i2.${base.t}`.slice(0, 30);
+    const csv = "Nivel,Tipo,Plataforma,Usuario,Nombre,Enfoque,Ciudad,Seguidores,Dato de seguidores,Notas,Perfil\n" +
+      `Micro,Creador,Instagram,@${h1},Uno,TCC,CDMX,98.8K,verificado,,\nNano,Clínica,TikTok,@${h2},Dos,,,12K,,,\n`;
+    const { rows } = parseSocialCsv(csv, "influencers");
+    return { ...base, mk, rows, h1, h2, importSocialLeads, parseSocialCsv };
+  }
+
+  it("importa con Ale como dueña, en nuevo, con su liga de invitación; la segunda corrida no crea nada", async () => {
+    const { db, rows, mk, actor, importSocialLeads, h1, h2 } = await importSetup();
+    const { contacts, socialLinks } = await import("@/db/schema");
+    const { and, inArray } = await import("drizzle-orm");
+    const ale = await mk("ale");
+    expect(await importSocialLeads(db, rows, { ownerId: ale, actor })).toEqual({ created: 2, existing: 0, otherOwner: [] });
+    expect(await importSocialLeads(db, rows, { ownerId: ale, actor })).toEqual({ created: 0, existing: 2, otherOwner: [] });
+    const cs = await db.select().from(contacts).where(inArray(contacts.socialHandle, [h1, h2]));
+    expect(cs).toHaveLength(2);
+    for (const c of cs) {
+      expect(c).toMatchObject({ ownerId: ale, leadStatus: "nuevo", socialLeadType: "influencer" });
+      const links = await db.select().from(socialLinks).where(and(eq(socialLinks.contactId, c.id), eq(socialLinks.kind, "invitacion")));
+      expect(links).toHaveLength(1);
+    }
+    expect(cs.find((c) => c.socialHandle === h2)).toMatchObject({ source: "tiktok", socialPlatform: "tiktok", socialTier: "nano" });
+  });
+
+  it("un lead que ya existía con otro dueño no se reasigna ni cambia de estado, y se reporta", async () => {
+    const { db, rows, mk, actor, importSocialLeads, h1 } = await importSetup();
+    const { upsertContact } = await import("./contacts");
+    const { contacts } = await import("@/db/schema");
+    const ale = await mk("ale"), eu = await mk("eu");
+    const previo = await upsertContact(db, { name: "Previo", source: "instagram", tags: [], leadStatus: "respondio", ownerId: eu, social: { platform: "instagram", handle: `https://instagram.com/${h1.toUpperCase()}/?igsh=zzz` } });
+    const r = await importSocialLeads(db, rows, { ownerId: ale, actor });
+    expect(r).toEqual({ created: 1, existing: 1, otherOwner: [previo.id] });
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, previo.id));
+    expect(c).toMatchObject({ ownerId: eu, leadStatus: "respondio", socialFollowers: "98.8K", socialTier: "micro" });
+  });
+
+  it("el mismo usuario en las dos listas conserva el tipo de la primera", async () => {
+    const { db, rows, mk, actor, importSocialLeads, parseSocialCsv, h1 } = await importSetup();
+    const { contacts } = await import("@/db/schema");
+    const ale = await mk("ale");
+    await importSocialLeads(db, rows, { ownerId: ale, actor });
+    const psi = parseSocialCsv(`Zona,Alcaldía / municipio,Tipo,Usuario,Nombre\nZ,Coyoacán,Psicólogo/a,@${h1},Uno\n`, "psicologos").rows;
+    expect(await importSocialLeads(db, psi, { ownerId: ale, actor })).toEqual({ created: 0, existing: 1, otherOwner: [] });
+    const [c] = await db.select().from(contacts).where(eq(contacts.socialHandle, h1));
+    expect(c.socialLeadType).toBe("influencer");
+  });
+
+  it("un contacto que tenía el perfil en website se reconoce como el mismo", async () => {
+    const { db, rows, mk, actor, importSocialLeads, h1 } = await importSetup();
+    const { upsertContact } = await import("./contacts");
+    const { contacts } = await import("@/db/schema");
+    const ale = await mk("ale");
+    const previo = await upsertContact(db, { name: "Previo", email: `p${h1}@example.com`, source: "manual", tags: [], website: `https://instagram.com/${h1.toUpperCase()}/` });
+    const r = await importSocialLeads(db, rows.slice(0, 1), { ownerId: ale, actor });
+    expect(r.created).toBe(0);
+    expect(r.existing).toBe(1);
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, previo.id));
+    expect(c).toMatchObject({ socialPlatform: "instagram", socialHandle: h1, ownerId: ale });
+  });
 });
