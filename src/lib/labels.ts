@@ -105,6 +105,29 @@ export const CONTACT_SOURCE: Record<string, string> = {
   manual: "Manual", luma: "Luma", notion: "Notion", linkedin: "LinkedIn", ai_tinkerers: "AI Tinkerers",
   demo_form: "Formulario demo", ziora_app: "App Ziora", facebook_group: "Grupo FB", instagram: "Instagram", csv_import: "CSV",
   sheet_import: "Hoja de leads", event_ops: "Event Ops", referral: "Referido",
+  whatsapp_group: "Grupo WhatsApp", telegram_group: "Grupo Telegram", landing_comunidad: "Landing comunidad",
+};
+
+export const COMMUNITY_PLATFORM: Record<string, string> = {
+  facebook: "Facebook", whatsapp: "WhatsApp", telegram: "Telegram", linkedin: "LinkedIn", reddit: "Reddit",
+  discord: "Discord", asociacion: "Asociación", otro: "Otro",
+};
+export const COMMUNITY_PROMO_POLICY: Record<string, string> = {
+  desconocido: "Desconocida", si: "Permite promoción", no: "No permite promoción",
+  permiso_admin: "Con permiso del admin", dias_especificos: "Solo días específicos",
+};
+export const COMMUNITY_STATUS: Record<string, string> = {
+  por_revisar: "Por revisar", aprobada: "Aprobada", activa: "Activa", pausada: "Pausada",
+  sin_promocion: "Sin promoción", descartada: "Descartada",
+};
+export const COMMUNITY_KIND: Record<string, string> = { grupo: "Grupo", alianza: "Alianza" };
+export const MEMBERSHIP_STATUS: Record<string, string> = {
+  por_solicitar: "Por solicitar", solicitud_enviada: "Solicitud enviada", unida: "Unida",
+  rechazada: "Rechazada", nos_sacaron: "Nos sacaron", salio: "Salió",
+};
+export const BASE_MESSAGE_STATUS: Record<string, string> = { borrador: "Borrador", aprobado: "Aprobado", retirado: "Retirado" };
+export const COMMUNITY_POST_STATUS: Record<string, string> = {
+  planeado: "Planeado", publicado: "Publicado", omitido: "Omitido", espera_admin: "Espera al admin", borrado_admin: "Borrado por el admin",
 };
 
 /** Checklist de la sección 5 del brief GTM: debe estar completa para aprobar una pieza. */
