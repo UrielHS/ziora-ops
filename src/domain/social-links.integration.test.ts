@@ -224,3 +224,94 @@ describe.runIf(enabled)("registro de la app ligado al lead de redes", () => {
     }
   });
 });
+
+describe.runIf(enabled)("captura suave de /comunidad con UTM de redes", () => {
+  const uniq = () => `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+  async function mk(opts: { promo?: boolean; owner?: boolean } = {}) {
+    const { db } = await import("@/db");
+    const { upsertContact } = await import("./contacts");
+    const { ensureInviteLink, createPromoLink } = await import("./social-links");
+    const { contacts } = await import("@/db/schema");
+    const { users } = await import("@/db/shared");
+    const t = uniq();
+    let ownerId: string | null = null;
+    if (opts.owner) ownerId = (await db.insert(users).values({ email: `own${t}@ziora.test`, name: "Dueña", role: "operator", active: true }).returning({ id: users.id }))[0].id;
+    const lead = await upsertContact(db, { name: "Lead", source: "instagram", tags: [], ownerId, social: { platform: "instagram", handle: `cp.${t}`.slice(0, 30), leadType: "psicologo" } });
+    let link = await ensureInviteLink(db, lead.id, null);
+    if (opts.promo) {
+      await db.update(contacts).set({ influencerStage: "acuerdo_cerrado" }).where(eq(contacts.id, lead.id));
+      link = await createPromoLink(db, lead.id, null);
+    }
+    return { db, lead, link, t, ownerId };
+  }
+  const activities = async (db: Awaited<ReturnType<typeof mk>>["db"], id: string) => {
+    const { contactActivities } = await import("@/db/schema");
+    return db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
+  };
+
+  it("quien deja su correo desde su invitación completa su propio lead", async () => {
+    const { db, lead, link, t } = await mk({ owner: true });
+    const { ingestSocialCapture } = await import("./social-links");
+    const { contacts } = await import("@/db/schema");
+    const r = await ingestSocialCapture(db, { fullName: "Ana", email: `Ana${t}@example.com`, utm: { utm_medium: "redes", utm_term: link.code } });
+    expect(r).toEqual({ contactId: lead.id, result: "lead_updated" });
+    const c = (await db.select().from(contacts).where(eq(contacts.id, lead.id)))[0];
+    expect(c.email).toBe(`ana${t}@example.com`);
+    expect((await activities(db, lead.id)).some((a) => a.summary === "Dejó su correo en la página de invitación")).toBe(true);
+  });
+
+  it("si el correo ya es de otro contacto, no se fusiona y queda actividad en los dos", async () => {
+    const { db, lead, link, t } = await mk();
+    const { ingestSocialCapture } = await import("./social-links");
+    const { upsertContact } = await import("./contacts");
+    const { contacts } = await import("@/db/schema");
+    const other = await upsertContact(db, { name: "Otro", email: `otro${t}@example.com`, source: "manual", tags: [] });
+    const r = await ingestSocialCapture(db, { fullName: "Ana", email: `otro${t}@example.com`, utm: { utm_medium: "redes", utm_term: link.code } });
+    expect(r.result).toBe("lead_updated");
+    expect(r.contactId).toBe(lead.id);
+    expect((await db.select().from(contacts).where(eq(contacts.id, lead.id)))[0].email).toBeNull();
+    expect((await activities(db, lead.id)).length).toBeGreaterThan(0);
+    expect((await activities(db, other.id)).some((a) => a.summary.includes("invitación"))).toBe(true);
+  });
+
+  it("desde la liga de promoción de un influencer nace un lead con el mismo dueño", async () => {
+    const { db, link, t, ownerId } = await mk({ promo: true, owner: true });
+    const { ingestSocialCapture } = await import("./social-links");
+    const { contacts } = await import("@/db/schema");
+    const utm = { utm_source: "instagram", utm_medium: "redes", utm_campaign: "redes-promo-202611", utm_content: "promo", utm_term: link.code };
+    const r = await ingestSocialCapture(db, { fullName: "Beto", email: `beto${t}@example.com`, utm });
+    expect(r.result).toBe("lead_created");
+    const c = (await db.select().from(contacts).where(eq(contacts.id, r.contactId!)))[0];
+    expect(c).toMatchObject({ ownerId, source: "instagram", leadStatus: "nuevo" });
+    expect(c.utm.utm_term).toBe(link.code);
+  });
+
+  it("con código desconocido crea el lead sin dueño", async () => {
+    const { db, t } = await mk();
+    const { ingestSocialCapture } = await import("./social-links");
+    const { contacts } = await import("@/db/schema");
+    const r = await ingestSocialCapture(db, { fullName: "Cris", email: `cris${t}@example.com`, utm: { utm_medium: "redes", utm_term: "zzzzzzz" } });
+    expect(r.result).toBe("lead_created");
+    const c = (await db.select().from(contacts).where(eq(contacts.id, r.contactId!)))[0];
+    expect(c.ownerId).toBeNull();
+    expect(c.source).toBe("landing_comunidad");
+  });
+
+  it("la ruta manda redes a ingestSocialCapture y comunidad a ingestCommunityCapture", async () => {
+    const { db, t } = await mk();
+    const { demoRequests, contacts } = await import("@/db/schema");
+    const { hmacSha256Hex } = await import("@/lib/crypto");
+    process.env.DEMO_WEBHOOK_SECRET = "whsec";
+    const { POST } = await import("@/app/api/webhooks/demo/route");
+    const call = (body: unknown) => { const raw = JSON.stringify(body); return POST(new Request("http://x/w", { method: "POST", headers: { "x-ziora-signature": hmacSha256Hex("whsec", raw) }, body: raw })); };
+    const before = (await db.select().from(demoRequests)).length;
+    const email = `ruta${t}@example.com`;
+    const res = await call({ fullName: "Ruta", email, utm: { utm_medium: "redes", utm_term: "zzzzzzz" } });
+    expect(await res.json()).toEqual({ ok: true, result: "lead" });
+    expect((await db.select().from(demoRequests)).length).toBe(before);
+    expect((await db.select().from(contacts).where(eq(contacts.email, email)))[0].source).toBe("landing_comunidad");
+    const email2 = `ruta2${t}@example.com`;
+    expect(await (await call({ fullName: "Com", email: email2, utm: { utm_medium: "comunidad", utm_term: "zzzzzzz" } })).json()).toEqual({ ok: true, result: "lead" });
+    expect((await db.select().from(demoRequests)).length).toBe(before);
+  });
+});

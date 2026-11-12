@@ -2,10 +2,13 @@
 import { randomInt } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
-import { appUsers, contactTags, contacts, socialLinks, type SocialLink } from "@/db/schema";
+import { appUsers, contactTags, contacts, socialLinks, type ContactSource, type SocialLink } from "@/db/schema";
+import { users } from "@/db/shared";
+import { notifyTeam } from "@/integrations/notify";
+import { normalizeEmail, upsertContact } from "./contacts";
 import { CODE_ALPHABET, type UtmKey } from "./community-posts";
 import { logActivity, SYSTEM_ACTOR } from "./leads";
-import type { SocialLeadType, SocialPlatform } from "./social-leads";
+import { addContactChannel, type SocialLeadType, type SocialPlatform } from "./social-leads";
 
 export type { SocialLink };
 export type SocialLinkKind = "invitacion" | "promocion";
@@ -155,4 +158,54 @@ export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ li
     if (didLink) linked++;
   }
   return { linked, attributed, failed };
+}
+
+async function notifyLeadOwner(db: Db, ownerId: string | null, contactId: string, text: string) {
+  if (!ownerId) return;
+  try {
+    const [o] = await db.select({ email: users.email }).from(users).where(eq(users.id, ownerId)).limit(1);
+    if (o) await notifyTeam([o.email], "Un lead de redes dejó su correo", [text], { href: `/leads/${contactId}`, label: "Abrir lead" });
+  } catch { /* el aviso es de cortesía: no debe tumbar la captura */ }
+}
+
+/**
+ * Captura suave de /comunidad cuando la visita trae UTM de redes (viene de un DM).
+ * Liga de invitación: el correo se agrega al lead de la liga (si ya es de otro contacto no se fusiona: queda actividad en los dos).
+ * Liga de promoción o código desconocido: se crea o completa un contacto por correo, con el dueño del influencer de la liga si lo hay.
+ * Sin correos ni usuarios en el log.
+ */
+export async function ingestSocialCapture(
+  db: Db, p: { fullName: string; email: string; utm: Record<string, string>; note?: string }, now: Date = new Date(),
+): Promise<{ contactId: string | null; result: "lead_updated" | "lead_created" }> {
+  const code = (p.utm.utm_term ?? "").trim().toLowerCase();
+  const [link] = SOCIAL_CODE_RE.test(code)
+    ? await db.select({ kind: socialLinks.kind, contactId: socialLinks.contactId, ownerId: contacts.ownerId })
+        .from(socialLinks).innerJoin(contacts, eq(contacts.id, socialLinks.contactId)).where(eq(socialLinks.code, code)).limit(1)
+    : [];
+
+  if (link?.kind === "invitacion") {
+    const summary = "Dejó su correo en la página de invitación";
+    const r = await addContactChannel(db, link.contactId, { email: p.email }, SYSTEM_ACTOR);
+    if (r.ok) {
+      await logActivity(db, { contactId: link.contactId, type: "sistema", actor: SYSTEM_ACTOR, occurredAt: now, summary, meta: { kind: "social_capture", linkCode: code } });
+    } else {
+      // El correo ya es de otro contacto: no se fusiona; queda anotado en los dos.
+      await logActivity(db, { contactId: link.contactId, type: "sistema", actor: SYSTEM_ACTOR, occurredAt: now, summary: `${summary}, pero ese correo ya es de otro contacto`, meta: { kind: "social_capture", linkCode: code, correo_en_otro_lead: r.takenBy } });
+      await logActivity(db, { contactId: r.takenBy, type: "sistema", actor: SYSTEM_ACTOR, occurredAt: now, summary: "Dejó su correo en la página de invitación de otro lead", meta: { kind: "social_capture", linkCode: code, lead: link.contactId } });
+    }
+    await notifyLeadOwner(db, link.ownerId, link.contactId, "Un lead de redes dejó su correo desde su invitación.");
+    return { contactId: link.contactId, result: "lead_updated" };
+  }
+
+  const src = (p.utm.utm_source ?? "").trim().toLowerCase();
+  const source: ContactSource = src === "instagram" || src === "tiktok" ? src : "landing_comunidad";
+  const { id, created } = await upsertContact(db, {
+    name: p.fullName, email: normalizeEmail(p.email), source, tags: ["psychologist", "lead"], leadStatus: "nuevo",
+    notes: p.note ?? null, utm: p.utm, ownerId: link?.ownerId ?? null,
+  });
+  await logActivity(db, {
+    contactId: id, type: "sistema", actor: SYSTEM_ACTOR, occurredAt: now,
+    summary: "Registro desde la página de comunidad (visita de redes)", meta: { kind: "social_capture", linkCode: link ? code : null },
+  });
+  return { contactId: id, result: created ? "lead_created" : "lead_updated" };
 }
