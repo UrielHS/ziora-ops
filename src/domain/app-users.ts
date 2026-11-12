@@ -3,10 +3,11 @@
  * El contrato del snapshot es estricto: si la app manda un campo no permitido (por ejemplo,
  * algo de un paciente), la sincronización completa se rechaza. Ver docs/API-ZIORA-APP.md.
  */
-import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db";
 import { appUserDaily, appUsers, planPrices } from "@/db/schema";
+import { resolveAttribution } from "./community-leads";
 import { monthlyValue, type BillingPeriod } from "./sales";
 
 export const SnapshotUser = z.strictObject({
@@ -28,6 +29,17 @@ export const SnapshotUser = z.strictObject({
   cancelAtPeriodEnd: z.boolean().optional(),
   // Código de referido con el que se registró (la app lo manda desde nov-2026; versiones viejas no)
   referredByCode: z.string().max(32).nullable().optional(),
+  // Snapshot v2 (Ops manda "v": 2): atribución de registro y señales de uso. Todo opcional para seguir aceptando v1.
+  attribution: z.strictObject({
+    utm_source: z.string().max(200).optional(), utm_medium: z.string().max(200).optional(), utm_campaign: z.string().max(200).optional(),
+    utm_content: z.string().max(200).optional(), utm_term: z.string().max(200).optional(),
+    gclid: z.string().max(200).optional(), fbclid: z.string().max(200).optional(), ref: z.string().max(200).optional(),
+  }).nullable().optional(),
+  trialKind: z.string().max(16).nullable().optional(),
+  hasPaidInvoice: z.boolean().optional(),
+  feedbackCount: z.number().int().min(0).optional(),
+  sessionsTotal: z.number().int().min(0).optional(),
+  notesTotal: z.number().int().min(0).optional(),
 });
 export const Snapshot = z.strictObject({
   generatedAt: z.iso.datetime({ offset: true }),
@@ -150,6 +162,19 @@ export async function setAppUserTest(db: Db, uid: string, isTest: boolean) {
   await db.update(appUsers).set({ isTest }).where(eq(appUsers.uid, uid));
 }
 
+/** Liga a su comunidad y post (por utm_term, o utm_content) a quien tiene atribución y aún no está ligado. */
+export async function linkCommunities(db: Db) {
+  const pending = await db.select({ uid: appUsers.uid, attribution: appUsers.attribution }).from(appUsers)
+    .where(and(isNull(appUsers.communityId), isNotNull(appUsers.attribution), sql`${appUsers.attribution} <> '{}'::jsonb`));
+  const cache = new Map<string, Awaited<ReturnType<typeof resolveAttribution>>>();
+  for (const p of pending) {
+    const key = `${p.attribution.utm_term ?? ""}|${p.attribution.utm_content ?? ""}`;
+    let r = cache.get(key);
+    if (!r) { r = await resolveAttribution(db, p.attribution); cache.set(key, r); }
+    if (r.communityId) await db.update(appUsers).set({ communityId: r.communityId, communityPostId: r.postId }).where(eq(appUsers.uid, p.uid));
+  }
+}
+
 /** Aplica un snapshot completo: upsert, marca bajas y guarda la foto diaria por plan. */
 export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
   const toDate = (s?: string | null) => (s ? new Date(s) : null);
@@ -160,10 +185,15 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
     billingPeriod: u.billingPeriod ?? null, mrrCents: u.mrrAmount == null ? null : Math.round(u.mrrAmount * 100),
     currency: u.currency ?? null, currentPeriodEnd: toDate(u.currentPeriodEnd), cancelAtPeriodEnd: u.cancelAtPeriodEnd ?? false,
     referredByCode: u.referredByCode ?? null,
+    attribution: (u.attribution ?? {}) as Record<string, string>, trialKind: u.trialKind ?? null,
+    hasPaidInvoice: u.hasPaidInvoice ?? null,
+    feedbackCount: u.feedbackCount ?? 0, sessionsTotal: u.sessionsTotal ?? 0, notesTotal: u.notesTotal ?? 0,
     isTest: looksLikeTestAccount(u.email),
     syncedAt: now, removedAt: null,
   }));
 
+  // Los contadores solo se pisan si la app mandó v2; con un snapshot v1 se conservan los que había.
+  const v2 = snap.users.some((u) => u.sessionsTotal !== undefined || u.notesTotal !== undefined || u.feedbackCount !== undefined);
   await db.transaction(async (tx) => {
     for (let i = 0; i < rows.length; i += 500) {
       await tx.insert(appUsers).values(rows.slice(i, i + 500)).onConflictDoUpdate({
@@ -176,6 +206,11 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
           currentPeriodEnd: sql`excluded.current_period_end`, cancelAtPeriodEnd: sql`excluded.cancel_at_period_end`,
           // La atribución es permanente en la app: si el snapshot no trae código (o trae null), se conserva el que había.
           referredByCode: sql`coalesce(excluded.referred_by_code, app_users.referred_by_code)`,
+          // Atribución y tipo de prueba también son permanentes: vacío o null no borran lo guardado.
+          attribution: sql`case when excluded.attribution = '{}'::jsonb then app_users.attribution else excluded.attribution end`,
+          trialKind: sql`coalesce(excluded.trial_kind, app_users.trial_kind)`,
+          hasPaidInvoice: sql`coalesce(excluded.has_paid_invoice, app_users.has_paid_invoice)`,
+          ...(v2 ? { feedbackCount: sql`excluded.feedback_count`, sessionsTotal: sql`excluded.sessions_total`, notesTotal: sql`excluded.notes_total` } : {}),
           // La marca de prueba solo sube: la pone el equipo o la detección por correo, y nadie la quita al sincronizar.
           isTest: sql`app_users.is_test or excluded.is_test`,
           syncedAt: sql`excluded.synced_at`, removedAt: sql`null`,
@@ -188,6 +223,8 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
         .where(and(isNull(appUsers.removedAt), notInArray(appUsers.uid, rows.map((r) => r.uid))));
     }
   });
+
+  await linkCommunities(db);
 
   const prices = await db.select().from(planPrices);
   const current = await db.select().from(appUsers).where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false)));
