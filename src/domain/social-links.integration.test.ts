@@ -192,4 +192,35 @@ describe.runIf(enabled)("registro de la app ligado al lead de redes", () => {
     expect((await row(db, lead.id)).appUserUid).toBeNull();
     expect((await acts(db, lead.id)).length).toBe(0);
   });
+  it("si un usuario falla no tumba la sincronización: los demás se procesan y el fallo se cuenta", async () => {
+    const { db, lead: leadA, link: linkA, t } = await mk();
+    const { lead: leadB, link: linkB } = await mk();
+    const { sql } = await import("drizzle-orm");
+    const { linkSocialSignups } = await import("./social-links");
+    const { appUsers } = await import("@/db/schema");
+    const base = { plan: "free", status: "free", syncedAt: new Date() };
+    const poisonUid = `poison-${t}`;
+    await db.insert(appUsers).values([
+      { ...base, uid: poisonUid, email: `poison-${t}@example.com`, signedUpAt: new Date(Date.now() - 7200_000), attribution: { utm_medium: "redes", utm_term: linkA.code } },
+      { ...base, uid: `ok-${t}`, email: `ok-${t}@example.com`, signedUpAt: new Date(Date.now() - 3600_000), attribution: { utm_medium: "redes", utm_term: linkB.code } },
+    ]);
+    const fn = `ops.t7_poison_${t}`;
+    const trg = `t7_poison_${t}`;
+    await db.execute(sql.raw(`create function ${fn}() returns trigger language plpgsql as $$ begin if new.app_user_uid = '${poisonUid}' then raise exception 'boom'; end if; return new; end $$`));
+    await db.execute(sql.raw(`create trigger ${trg} before update on ops.contacts for each row execute function ${fn}()`));
+    const errSpy = (await import("vitest")).vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const r = await linkSocialSignups(db);
+      expect(r.failed).toBeGreaterThanOrEqual(1);
+      expect((await row(db, leadB.id)).appUserUid).toBe(`ok-${t}`);
+      expect((await row(db, leadA.id)).appUserUid).toBeNull();
+      const logged = errSpy.mock.calls.flat().join(" ");
+      expect(logged).toContain(poisonUid);
+      expect(logged).not.toContain("@example.com");
+    } finally {
+      errSpy.mockRestore();
+      await db.execute(sql.raw(`drop trigger ${trg} on ops.contacts`));
+      await db.execute(sql.raw(`drop function ${fn}()`));
+    }
+  });
 });

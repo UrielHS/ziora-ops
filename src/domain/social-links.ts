@@ -104,21 +104,23 @@ export async function loadLinks(db: Dbx, contactIds: string[]): Promise<Map<stri
  * las cuentas de prueba, los siguientes registros y las ligas de promoción solo quedan atribuidos.
  * Una transacción por usuario: un choque (p. ej. el correo ya es de otro contacto) nunca tumba la sincronización.
  */
-export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ linked: number; attributed: number }> {
+export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ linked: number; attributed: number; failed: number }> {
   const pending = await db
     .select({ uid: appUsers.uid, email: appUsers.email, isTest: appUsers.isTest, code: sql<string>`${appUsers.attribution}->>'utm_term'` })
     .from(appUsers)
     .where(and(isNull(appUsers.socialLinkId), isNotNull(appUsers.attribution), sql`${appUsers.attribution}->>'utm_term' is not null`))
     .orderBy(sql`${appUsers.signedUpAt} asc nulls last`, asc(appUsers.uid));
   const codes = [...new Set(pending.map((p) => p.code).filter((c) => SOCIAL_CODE_RE.test(c)))];
-  if (!codes.length) return { linked: 0, attributed: 0 };
+  if (!codes.length) return { linked: 0, attributed: 0, failed: 0 };
   const links = new Map((await db.select().from(socialLinks).where(inArray(socialLinks.code, codes))).map((l) => [l.code, l]));
 
-  let linked = 0, attributed = 0;
+  let linked = 0, attributed = 0, failed = 0;
   for (const p of pending) {
     const link = links.get(p.code);
     if (!link) continue;
-    const didLink = await db.transaction(async (tx) => {
+    let didLink: boolean | null;
+    try {
+      didLink = await db.transaction(async (tx) => {
       const set = await tx.update(appUsers).set({ socialLinkId: link.id }).where(and(eq(appUsers.uid, p.uid), isNull(appUsers.socialLinkId))).returning({ uid: appUsers.uid });
       if (!set.length) return null; // otro proceso ya lo atribuyó
       if (link.kind !== "invitacion" || p.isTest) return false;
@@ -141,10 +143,16 @@ export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ li
       await tx.insert(contactTags).values({ contactId: link.contactId, tag: "ziora_user" }).onConflictDoNothing();
       await logActivity(tx, { contactId: link.contactId, type: "sistema", actor: SYSTEM_ACTOR, summary: "Se registró en Ziora con su invitación", meta });
       return true;
-    });
+      });
+    } catch (err) {
+      // La transacción de este usuario se deshizo: se sigue con los demás. Sin correo ni @ en el log (el mensaje de Postgres puede traerlos).
+      failed++;
+      console.error("[social-signups] no se pudo ligar", p.uid, (err as { code?: string })?.code ?? "error");
+      continue;
+    }
     if (didLink === null) continue;
     attributed++;
     if (didLink) linked++;
   }
-  return { linked, attributed };
+  return { linked, attributed, failed };
 }
