@@ -61,7 +61,7 @@ export function isActive(lastActiveAt: Date | null, now: Date, days = ACTIVE_DAY
   return !!lastActiveAt && now.getTime() - lastActiveAt.getTime() <= days * DAY;
 }
 
-type Price = { plan: string; priceMxn: number; billingPeriod: BillingPeriod; paying: boolean };
+export type Price = { plan: string; priceMxn: number; billingPeriod: BillingPeriod; paying: boolean };
 type Billing = { mrrCents?: number | null; currency?: string | null };
 type UserLike = { plan: string; status: string; lastActiveAt: Date | null; patientCount: number; removedAt?: Date | null } & Billing;
 

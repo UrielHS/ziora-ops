@@ -1,10 +1,12 @@
 /** Influencers de redes: opinión, etapas y acuerdo cerrado (con su liga de promoción). */
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
-import { appUsers, contacts, influencerDeals } from "@/db/schema";
+import { appUsers, contacts, influencerDeals, planPrices, type LeadStatus } from "@/db/schema";
+import { inNoCardTrial, isActive, isPaying, type Price } from "./app-users";
 import { INFLUENCER_STAGE } from "@/lib/labels";
 import { logActivity, type Actor } from "./leads";
-import { createPromoLink } from "./social-links";
+import { createPromoLink, loadLinks } from "./social-links";
+import type { SocialPlatform } from "./social-leads";
 import { canMoveStage, usesZiora, type DealKind, type InfluencerStage } from "./social-shared";
 
 export { canMoveStage, usesZiora, type InfluencerStage, type DealKind };
@@ -88,4 +90,70 @@ export async function closeDeal(
     }
     return { promoCode: link.code };
   });
+}
+
+type PromoUser = { status: string; plan: string; mrrCents: number | null; currency: string | null; trialKind: string | null; trialEndsAt: Date | null };
+
+/** Registros que trajo una liga de promoción: cuántos, cuántos siguen en prueba (con o sin tarjeta) y cuántos pagan. */
+export function promoStats(users: PromoUser[], prices: Price[], now: Date): { signups: number; inTrial: number; paying: number } {
+  return {
+    signups: users.length,
+    inTrial: users.filter((u) => /trial/i.test(u.status) || inNoCardTrial(u, now)).length,
+    paying: users.filter((u) => isPaying(u, prices)).length,
+  };
+}
+
+export type InfluencerRow = {
+  contactId: string; name: string; handle: string; platform: SocialPlatform; followers: string | null;
+  leadStatus: LeadStatus | null; stage: InfluencerStage | null;
+  own: { registered: boolean; active: boolean; sessionsTotal: number; notesTotal: number; paying: boolean };
+  deal: { kind: string; terms: string; closedOn: string } | null;
+  promo: { code: string; clicks: number; signups: number; inTrial: number; paying: number } | null;
+  invitedExtra: number;
+};
+
+/**
+ * Tablero de influencers: una consulta por tabla, nunca una por fila. Con acuerdo primero, luego por registros de su liga.
+ * `promo.*` y `invitedExtra` excluyen cuentas de prueba, bajas y la propia cuenta del influencer.
+ */
+export async function loadInfluencerBoard(db: Db, now = new Date()): Promise<InfluencerRow[]> {
+  const cs = await db
+    .select({
+      id: contacts.id, name: contacts.name, handle: contacts.socialHandle, platform: contacts.socialPlatform, followers: contacts.socialFollowers,
+      leadStatus: contacts.leadStatus, stage: contacts.influencerStage, uid: contacts.appUserUid,
+    })
+    .from(contacts).where(eq(contacts.socialLeadType, "influencer"));
+  if (!cs.length) return [];
+  const ids = cs.map((c) => c.id);
+  const uids = cs.map((c) => c.uid).filter((u): u is string => !!u);
+  const links = await loadLinks(db, ids);
+  const linkIds = [...links.values()].flatMap((l) => [l.invite?.id, l.promo?.id]).filter((x): x is string => !!x);
+  const conds = [linkIds.length ? inArray(appUsers.socialLinkId, linkIds) : undefined, uids.length ? inArray(appUsers.uid, uids) : undefined].filter((x) => !!x);
+  const [deals, prices, users] = await Promise.all([
+    db.select().from(influencerDeals).where(inArray(influencerDeals.contactId, ids)),
+    db.select().from(planPrices) as Promise<Price[]>,
+    conds.length ? db.select().from(appUsers).where(or(...conds)) : Promise.resolve([]),
+  ]);
+  const dealBy = new Map(deals.map((d) => [d.contactId, d]));
+  const byUid = new Map(users.map((u) => [u.uid, u]));
+  const counted = users.filter((u) => !u.isTest && !u.removedAt);
+  const rows = cs.map((c): InfluencerRow => {
+    const own = c.uid ? byUid.get(c.uid) : undefined;
+    const live = own && !own.removedAt ? own : undefined;
+    const l = links.get(c.id);
+    const promoUsers = l?.promo ? counted.filter((u) => u.socialLinkId === l.promo!.id && u.uid !== c.uid) : [];
+    const d = dealBy.get(c.id);
+    return {
+      contactId: c.id, name: c.name, handle: c.handle ?? "", platform: (c.platform === "tiktok" ? "tiktok" : "instagram"), followers: c.followers,
+      leadStatus: c.leadStatus, stage: c.stage,
+      own: {
+        registered: !!live, active: !!live && isActive(live.lastActiveAt, now),
+        sessionsTotal: live?.sessionsTotal ?? 0, notesTotal: live?.notesTotal ?? 0, paying: !!live && isPaying(live, prices),
+      },
+      deal: d ? { kind: d.kind, terms: d.terms, closedOn: d.closedOn } : null,
+      promo: l?.promo ? { code: l.promo.code, clicks: l.promo.clicks, ...promoStats(promoUsers, prices, now) } : null,
+      invitedExtra: l?.invite ? counted.filter((u) => u.socialLinkId === l.invite!.id && u.uid !== c.uid).length : 0,
+    };
+  });
+  return rows.sort((a, b) => Number(!!b.deal) - Number(!!a.deal) || (b.promo?.signups ?? 0) - (a.promo?.signups ?? 0) || a.name.localeCompare(b.name));
 }

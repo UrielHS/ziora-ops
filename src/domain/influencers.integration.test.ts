@@ -110,4 +110,37 @@ describe.runIf(enabled)("influencer: opinión, etapas y acuerdo", () => {
     expect(links.length).toBe(1);
     expect(links[0].code).toBe(a.promoCode);
   });
+
+  it("el tablero junta el uso propio con lo que trae la liga de promoción y no cuenta su propio registro", async () => {
+    const { db, t, actor, inf } = await setup();
+    const { closeDeal, setInfluencerStage, loadInfluencerBoard } = await import("./influencers");
+    const { appUsers, planPrices } = await import("@/db/schema");
+    const { ensureInviteLink } = await import("./social-links");
+    await db.insert(planPrices).values({ plan: "pro", label: "Pro", priceMxn: 699, paying: true }).onConflictDoNothing();
+    await linkAccount(db, inf.id, t, 3);
+    const invite = await ensureInviteLink(db, inf.id, null);
+    await setInfluencerStage(db, inf.id, "quiere_promover", actor);
+    const { promoCode } = await closeDeal(db, inf.id, deal, actor);
+    const { socialLinks } = await import("@/db/schema");
+    const [promo] = await db.select().from(socialLinks).where(eq(socialLinks.code, promoCode));
+    const mkUser = (n: string, o: object) => db.insert(appUsers).values({ uid: `bu-${n}-${t}`, email: `${n}-${t}@example.com`, plan: "free", status: "free", syncedAt: new Date(), ...o });
+    await db.update(appUsers).set({ socialLinkId: invite.id }).where(eq(appUsers.uid, `inf-uid-${t}`)); // su propio registro por su invitación
+    await mkUser("a", { socialLinkId: promo.id });
+    await mkUser("b", { socialLinkId: promo.id, plan: "pro", status: "active", mrrCents: 69900, currency: "mxn" });
+    await mkUser("c", { socialLinkId: invite.id });
+    await mkUser("d", { socialLinkId: promo.id, isTest: true });
+    const row = (await loadInfluencerBoard(db)).find((r) => r.contactId === inf.id)!;
+    expect(row).toMatchObject({ own: { registered: true, sessionsTotal: 3 }, promo: { code: promoCode, signups: 2, paying: 1 }, invitedExtra: 1, deal: { kind: "comision" } });
+  });
+
+  it("un influencer con acuerdo que no usa Ziora sale marcado", async () => {
+    const { db, actor, inf } = await setup();
+    const { closeDeal, setInfluencerStage, loadInfluencerBoard } = await import("./influencers");
+    await setInfluencerStage(db, inf.id, "quiere_promover", actor);
+    await closeDeal(db, inf.id, { ...deal, overrideNoUse: true }, actor);
+    const row = (await loadInfluencerBoard(db)).find((r) => r.contactId === inf.id)!;
+    expect(row.own.registered).toBe(false);
+    expect(row.deal).not.toBeNull();
+    expect(row.promo).toMatchObject({ signups: 0, paying: 0 });
+  });
 });

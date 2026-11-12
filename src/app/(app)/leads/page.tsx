@@ -78,6 +78,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         subtitle="Cada tarjeta es una persona con la que hay que hablar. Arrastra para cambiar de etapa; el motivo de pérdida se captura en la ficha."
         actions={
           <>
+            <Link href="/leads/influencers" className={btn("ghost", "sm")}>Influencers</Link>
             <Link href="/leads/secuencias" className={btn("ghost", "sm")}>Secuencias</Link>
             <Link href="/leads/hoy" className={btn("primary")}>Mi día</Link>
           </>

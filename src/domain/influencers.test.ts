@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canMoveStage, usesZiora } from "./influencers";
+import { canMoveStage, promoStats, usesZiora } from "./influencers";
+
+const now = new Date("2026-11-12T12:00:00Z");
+const prices = [
+  { plan: "free", priceMxn: 0, billingPeriod: "monthly" as const, paying: false },
+  { plan: "pro", priceMxn: 699, billingPeriod: "monthly" as const, paying: true },
+];
 
 describe("influencers", () => {
   it("canMoveStage", () => {
@@ -20,5 +26,14 @@ describe("influencers", () => {
     expect(usesZiora({ sessionsTotal: 5, removedAt: new Date() })).toBe(false);
     expect(usesZiora(null)).toBe(false);
     expect(usesZiora(undefined)).toBe(false);
+  });
+  it("promoStats separa registros, en prueba y pagando", () => {
+    const u = (o: object) => ({ status: "free", plan: "free", mrrCents: null, currency: null, trialKind: null, trialEndsAt: null, ...o });
+    expect(promoStats([
+      u({ trialKind: "community", trialEndsAt: new Date(now.getTime() + 86_400_000) }),
+      u({ trialKind: "community", trialEndsAt: new Date(now.getTime() - 86_400_000) }),
+      u({ status: "active", plan: "pro", mrrCents: 69900, currency: "mxn" }),
+      u({ status: "trialing", plan: "pro" }),
+    ], prices, now)).toEqual({ signups: 4, inTrial: 2, paying: 1 });
   });
 });
