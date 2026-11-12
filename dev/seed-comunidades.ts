@@ -6,9 +6,9 @@
  * Idempotente: la campaña se busca por `slug` y los mensajes por `key`. Re-correrla restaura el texto aprobado.
  * El ajuste `community_lead_rr` (reparto de leads de comunidad entre Uriel y Chris) lo siembra la Tarea 7: aquí no se inventan ids de dueños.
  */
-import { eq, ilike } from "drizzle-orm";
+import { eq, ilike, inArray } from "drizzle-orm";
 import type { Db } from "@/db";
-import { baseMessages, communityCampaigns } from "@/db/schema";
+import { baseMessages, communityCampaigns, settings } from "@/db/schema";
 import { users } from "@/db/shared";
 
 export const COMMUNITY_CAMPAIGN = {
@@ -55,7 +55,20 @@ export const BASE_MESSAGES: SeedBaseMessage[] = [
   },
 ];
 
-export async function seedComunidades(db: Db): Promise<{ campaignCreated: boolean; messagesCreated: number; messagesUpdated: number }> {
+/** Resuelve correos de `public.users` a ids, en el orden dado. Falla si alguno no existe. */
+export async function resolveOwnerIds(db: Db, emails: string[]): Promise<string[]> {
+  const wanted = emails.map((e) => e.trim().toLowerCase()).filter(Boolean);
+  if (!wanted.length) throw new Error("--owners necesita al menos un correo");
+  const rows = await db.select({ id: users.id, email: users.email }).from(users).where(inArray(users.email, wanted));
+  const byEmail = new Map(rows.map((r) => [r.email.toLowerCase(), r.id]));
+  const missing = wanted.filter((e) => !byEmail.has(e));
+  if (missing.length) throw new Error(`No existe en public.users: ${missing.length} de los correos de --owners (${missing.map((_, i) => `#${wanted.indexOf(missing[i]) + 1}`).join(", ")})`);
+  return wanted.map((e) => byEmail.get(e)!);
+}
+
+export async function seedComunidades(db: Db, opts: { owners?: string[] } = {}): Promise<{ campaignCreated: boolean; messagesCreated: number; messagesUpdated: number }> {
+  // Se resuelven primero: si falta alguien, no se siembra nada a medias.
+  const ownerIds = opts.owners?.length ? await resolveOwnerIds(db, opts.owners) : null;
   // `approved_by` es un id de usuario de Ops: se resuelve el de Chris por nombre; si no existe (base local vacía), queda null.
   const [chris] = await db.select({ id: users.id }).from(users).where(ilike(users.name, "chris%")).limit(1);
   const approvedBy = chris?.id ?? null;
@@ -71,7 +84,14 @@ export async function seedComunidades(db: Db): Promise<{ campaignCreated: boolea
     if (cur) { await db.update(baseMessages).set(values).where(eq(baseMessages.id, cur.id)); messagesUpdated++; }
     else { await db.insert(baseMessages).values({ key: m.key, ...values }); messagesCreated++; }
   }
-  // Tarea 7: aquí se siembra el ajuste `community_lead_rr` (Uriel y Chris alternados).
+  if (ownerIds) {
+    // Reparto de leads de comunidad: solo estos dueños, alternados. Si ya había turno, se conserva (acotado al nuevo largo).
+    const [cur] = await db.select().from(settings).where(eq(settings.key, "community_lead_rr")).limit(1);
+    const prev = (cur?.value as { last?: number } | undefined)?.last;
+    const last = typeof prev === "number" && prev < ownerIds.length ? prev : -1;
+    await db.insert(settings).values({ key: "community_lead_rr", value: { ownerIds, last } })
+      .onConflictDoUpdate({ target: settings.key, set: { value: { ownerIds, last } } });
+  }
   return { campaignCreated: !camp, messagesCreated, messagesUpdated };
 }
 
@@ -79,7 +99,8 @@ export async function seedComunidades(db: Db): Promise<{ campaignCreated: boolea
 if (process.argv[1] && /seed-comunidades\.ts$/.test(process.argv[1].replace(/\\/g, "/"))) {
   (async () => {
     const { db } = await import("@/db");
-    const r = await seedComunidades(db);
+    const arg = process.argv.find((a) => a.startsWith("--owners="));
+    const r = await seedComunidades(db, { owners: arg ? arg.slice("--owners=".length).split(",") : undefined });
     console.log(`campaña «${COMMUNITY_CAMPAIGN.slug}»: ${r.campaignCreated ? "creada" : "actualizada"}; mensajes: ${r.messagesCreated} creados, ${r.messagesUpdated} actualizados`);
     process.exit(0);
   })().catch((e) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });
