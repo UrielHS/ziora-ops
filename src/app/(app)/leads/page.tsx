@@ -16,7 +16,7 @@ import { can } from "@/lib/permissions";
 import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string };
+type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string; redes?: string };
 
 const ACCENT: Record<string, string> = {
   nuevo: "bg-faint", contactado: "bg-[#1D5FA8]", respondio: "bg-[#6B4FA8]", demo_agendada: "bg-[#1D5FA8]", en_trial: "bg-[#D99A2B]", pago: "bg-emerald", perdido: "bg-danger",
@@ -38,6 +38,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   if (sp.origen) where.push(eq(contacts.source, sp.origen as (typeof contactSourceEnum.enumValues)[number]));
   if (sp.ciudad) where.push(eq(contacts.city, sp.ciudad as (typeof cityEnum.enumValues)[number]));
   if (sp.etiqueta) where.push(exists(db.select({ x: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, contacts.id), eq(contactTags.tag, sp.etiqueta as (typeof contactTagEnum.enumValues)[number])))));
+  // Leads de redes: ?redes=psicologo|influencer filtra por tipo; ?redes=todos deja solo los que tienen usuario de redes.
+  if (sp.redes === "psicologo" || sp.redes === "influencer") where.push(and(isNotNull(contacts.socialHandle), eq(contacts.socialLeadType, sp.redes))!);
+  else if (sp.redes === "todos") where.push(isNotNull(contacts.socialHandle));
   if (sp.q) where.push(or(ilike(contacts.name, `%${sp.q}%`), ilike(contacts.email, `%${sp.q}%`), ilike(contacts.company, `%${sp.q}%`))!);
 
   const [users, rows, [k], activeSequences] = await Promise.all([
@@ -97,6 +100,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         <Select name="origen" defaultValue={sp.origen} placeholder="Todos los orígenes" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_SOURCE)} />
         <Select name="etiqueta" defaultValue={sp.etiqueta} placeholder="Todas las etiquetas" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_TAG)} />
         <Select name="ciudad" defaultValue={sp.ciudad} placeholder="Todas las ciudades" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CITY)} />
+        <Select name="redes" defaultValue={sp.redes} placeholder="Sin filtro de redes" className="w-auto rounded-full py-1.5 text-xs" options={[["todos", "Todos los de redes"], ["psicologo", "Redes: psicólogos"], ["influencer", "Redes: influencers"]]} />
         <Select name="dueno" defaultValue={sp.dueno} placeholder="Cualquier dueño" className="w-auto rounded-full py-1.5 text-xs" options={[["ninguno", "Sin dueño"], ...userOptions(users)]} />
         <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">
           <input type="checkbox" name="todos" value="1" defaultChecked={sp.todos === "1"} className="h-3.5 w-3.5 accent-emerald" />

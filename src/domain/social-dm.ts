@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
-import { contactActivities, contacts } from "@/db/schema";
+import { baseMessages, contactActivities, contacts } from "@/db/schema";
 import { advanceLead, logActivity, type Actor } from "./leads";
 import type { SocialLeadType, SocialPlatform } from "./social-leads";
 
@@ -20,6 +20,11 @@ const PLATFORM_LABEL: Record<SocialPlatform, string> = { instagram: "Instagram",
 
 export function renderDm(body: string, v: { nombre: string; yo: string; liga: string; red: string }): string {
   return body.replaceAll("{nombre}", v.nombre).replaceAll("{yo}", v.yo).replaceAll("{liga}", v.liga).replaceAll("{red}", v.red);
+}
+
+/** Ajusta una fila de contacts a lo que pide `dmFor` (la columna admite plataformas que no son de DM). */
+export function dmLead(c: { name: string; socialLeadType: SocialLeadType | null; socialPlatform: string | null }) {
+  return { name: c.name, socialLeadType: c.socialLeadType, socialPlatform: (c.socialPlatform === "instagram" || c.socialPlatform === "tiktok" ? c.socialPlatform : null) as SocialPlatform | null };
 }
 
 /** Mensaje que toca para este lead. `text: null` = ese mensaje no está aprobado; `null` = ya no hay más pasos. */
@@ -42,8 +47,7 @@ export function dmFor(
 
 /** Días después del DM 1, 2 y 3 en que toca el siguiente paso. */
 export const FOLLOWUP_DAYS = [4, 7, 14] as const;
-/** Aviso (no tope duro) al pasar de este número de DMs mandados por persona en el día. */
-export const DM_DAILY_WARN = 30;
+export { DM_DAILY_WARN } from "./social-shared";
 /** Dos «Le escribí» del mismo lead dentro de esta ventana se cuentan como uno (doble clic). */
 export const DM_DEDUP_SECONDS = 120;
 
@@ -82,6 +86,12 @@ export async function recordDm(db: Db, contactId: string, actor: Actor, now = ne
     });
     return { recorded: true, step };
   });
+}
+
+/** Los seis mensajes R* (una consulta por render; se reparten a todas las filas). */
+export async function loadDmMessages(db: Dbx): Promise<{ key: string; body: string; status: string }[]> {
+  return db.select({ key: baseMessages.key, body: baseMessages.body, status: baseMessages.status })
+    .from(baseMessages).where(inArray(baseMessages.key, [...DM_KEYS.psicologo, ...DM_KEYS.influencer]));
 }
 
 /** DMs registrados por lead (los que no tienen ninguno no aparecen en el mapa). */

@@ -11,7 +11,11 @@ import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
 import { accountContacts, accounts, communities, communityPosts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
+import { SocialPanel, type DmView } from "@/components/social-leads";
+import { shortLink } from "@/domain/community-posts";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
+import { dmCounts, dmFor, dmLead, loadDmMessages } from "@/domain/social-dm";
+import { ensureInviteLink, loadLinks } from "@/domain/social-links";
 import { loadCadence } from "@/domain/sequences";
 import { getSellerProfile, referralCodeFrom, referralLinkWithUtm, utmCampaignFor } from "@/domain/sellers";
 import { waMessageLink } from "@/domain/phone";
@@ -56,6 +60,21 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const fromSequence = cadence?.status === "activa" && !!cadence.pendingText;
   const message = fromSequence ? cadence.pendingText! : defaultMessage(c, access.user.name);
   const wa = waMessageLink(c.phoneE164, message);
+  // Lead de redes: el panel «Redes» manda; sin teléfono no hay WhatsApp ni mensaje sugerido (el texto habla de Mexico Tech Week).
+  const isSocial = !!c.socialHandle;
+  const hideWhatsApp = isSocial && !c.phoneE164;
+  let social: { dm: DmView; inviteUrl: string | null; promoUrl: string | null; inviteClicks?: number; promoClicks?: number } | null = null;
+  if (isSocial) {
+    const [counts, links, dmMessages] = await Promise.all([dmCounts(db, [id]), loadLinks(db, [id]), loadDmMessages(db)]);
+    const l = links.get(id);
+    const invite = l?.invite ?? (canManage ? await ensureInviteLink(db, id, access.user.id) : undefined);
+    const firstName = access.user.name.trim().split(/\s+/)[0] ?? access.user.name;
+    const inviteUrl = invite ? shortLink(invite.code) : null;
+    social = {
+      dm: dmFor(dmLead(c), counts.get(id) ?? 0, dmMessages, { yo: firstName, liga: inviteUrl ?? "" }),
+      inviteUrl, promoUrl: l?.promo ? shortLink(l.promo.code) : null, inviteClicks: invite?.clicks, promoClicks: l?.promo?.clicks,
+    };
+  }
   const city = c.cityName ?? (c.city ? CITY[c.city] : null);
   const profile = ([
     ["Puesto", c.jobTitle], ["Empresa o clínica", c.company], ["Pacientes por semana", c.patientsPerWeek], ["Enfoque", c.approach],
@@ -72,7 +91,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           <>
             <Link href="/leads" className={btn("ghost", "sm")}>← Leads</Link>
             {c.email && <a href={`mailto:${c.email}`} className={btn("ghost", "sm")}><Mail className="h-3.5 w-3.5" /> Correo</a>}
-            <WhatsAppButton href={wa} />
+            {!hideWhatsApp && <WhatsAppButton href={wa} />}
             {account ? (
               <Link href={`/sales/accounts/${account.id}`} className={btn("secondary", "sm")}><Building2 className="h-3.5 w-3.5" /> Ver cuenta: {account.name}</Link>
             ) : canManage && looksB2B ? (
@@ -109,18 +128,27 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             </Card>
           )}
 
+          {social && (
+            <Card>
+              <PanelHeader title="Redes" subtitle="Copia el mensaje, abre el perfil y escríbele por DM; luego marca «Le escribí»." />
+              <SocialPanel c={c} dm={social.dm} inviteUrl={social.inviteUrl} promoUrl={social.promoUrl} inviteClicks={social.inviteClicks} promoClicks={social.promoClicks} canManage={canManage} />
+            </Card>
+          )}
+
           {canManage && (
             <Card>
               <PanelHeader title="Registrar toque" subtitle="Lo que hiciste hoy. El primer toque pasa el lead a Contactado." />
               <div className="flex flex-col gap-3 px-5 pb-5">
                 <TouchButtons id={c.id} />
-                <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="label">{fromSequence ? `Mensaje de la secuencia «${cadence.sequenceName}»` : "Mensaje sugerido"}</p>
-                    <CopyButton text={message} />
+                {!hideWhatsApp && (
+                  <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="label">{fromSequence ? `Mensaje de la secuencia «${cadence.sequenceName}»` : "Mensaje sugerido"}</p>
+                      <CopyButton text={message} />
+                    </div>
+                    <textarea readOnly value={message} rows={4} className="mt-2 w-full resize-none bg-transparent text-sm outline-none" />
                   </div>
-                  <textarea readOnly value={message} rows={4} className="mt-2 w-full resize-none bg-transparent text-sm outline-none" />
-                </div>
+                )}
               </div>
             </Card>
           )}

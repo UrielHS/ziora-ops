@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { and, eq, isNotNull, notInArray, type SQL } from "drizzle-orm";
 import { CadenceBadge, LeadPriorityBadge, LeadStatusBadge, TodayRow } from "@/components/leads";
+import { DmCounter, SocialTodayRow } from "@/components/social-leads";
 import { btn, Card, Empty, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
 import { contacts } from "@/db/schema";
+import { shortLink } from "@/domain/community-posts";
 import { defaultMessage, todayBuckets } from "@/domain/leads";
+import { dmCounts, dmFor, dmLead, dmsSentToday, loadDmMessages } from "@/domain/social-dm";
+import { ensureInviteLink, loadLinks } from "@/domain/social-links";
 import { waMessageLink } from "@/domain/phone";
 import { loadCadence } from "@/domain/sequences";
 import { todayISO } from "@/lib/format";
@@ -28,9 +32,24 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
   const [users, rows] = await Promise.all([listUsers(), db.select().from(contacts).where(and(...where))]);
   const cadence = await loadCadence(db, rows.map((r) => r.id));
 
+  // Leads de redes: contadores, ligas y mensajes R* se cargan una sola vez (nada de consultas por fila).
+  const socialIds = rows.filter((r) => r.socialHandle).map((r) => r.id);
+  const [sentCounts, links, dmMessages, sentToday] = await Promise.all([
+    dmCounts(db, socialIds), loadLinks(db, socialIds), loadDmMessages(db), dmsSentToday(db, access.user.id),
+  ]);
+  for (const id of socialIds) {
+    if (!links.get(id)?.invite) links.set(id, { ...links.get(id), invite: await ensureInviteLink(db, id, access.user.id) });
+  }
+  const myFirstName = access.user.name.trim().split(/\s+/)[0] ?? access.user.name;
+
   const { due, soon, noPlan, inSequence } = todayBuckets(rows, cadence, today, weekEnd);
   const ownerName = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
   const row = (c: typeof rows[number]) => {
+    if (c.socialHandle) {
+      const invite = links.get(c.id)?.invite;
+      const dm = dmFor(dmLead(c), sentCounts.get(c.id) ?? 0, dmMessages, { yo: myFirstName, liga: invite ? shortLink(invite.code) : "" });
+      return <SocialTodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} dm={dm} />;
+    }
     const cad = cadence.get(c.id);
     // Si la secuencia dejó un WhatsApp listo, el enlace de WhatsApp lleva ese texto.
     const message = cad?.status === "activa" && cad.pendingText ? cad.pendingText : defaultMessage(c, access.user.name);
@@ -51,6 +70,8 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
           </>
         }
       />
+
+      {(socialIds.length > 0 || sentToday > 0) && <DmCounter sent={sentToday} />}
 
       {due.length + soon.length + noPlan.length + inSequence.length === 0 && (
         <Empty title="Nada pendiente" text={mineOnly ? "No tienes leads con siguiente paso para hoy. Toma leads sin dueño en el kanban o revisa los de todos." : "Nadie tiene leads con siguiente paso pendiente."} action={<Link href="/leads" className={btn("primary", "sm")}>Ir al kanban</Link>} />

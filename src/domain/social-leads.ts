@@ -5,6 +5,7 @@ import { parseCsv } from "./marketing";
 
 import { normalizePhoneE164 } from "./phone";
 import { logActivity, type Actor } from "./leads";
+import { socialProfileUrl } from "./social-shared";
 
 export type SocialPlatform = "instagram" | "tiktok";
 export type SocialLeadType = "psicologo" | "influencer";
@@ -32,9 +33,7 @@ export function normalizeHandle(raw: string | null | undefined): string | null {
   return HANDLE_RE.test(s) ? s : null;
 }
 
-export function socialProfileUrl(platform: SocialPlatform, handle: string): string {
-  return platform === "tiktok" ? `https://www.tiktok.com/@${handle}` : `https://www.instagram.com/${handle}/`;
-}
+export { socialProfileUrl };
 
 /**
  * Agrega correo y/o teléfono a un lead que hasta ahora solo tenía su @. No fusiona contactos:
