@@ -24,11 +24,14 @@ export const PERMISSIONS = {
   "revenue.view": ["ceo", "sales", "operations"],
   "analytics.view": ["marketing", "ceo", "operations", "sales"],
   "integrations.manage": ["dev_qa", "operations", "ceo"],
-  // Leads (CRM): todos los ven; los trabajan ventas, dirección, operaciones, clínica y marketing (Ale lleva los COLD).
+  // Leads (CRM): todos los ven. Paulina y Ale NO llevan leads (Chris, 10-nov-2026; docs/RUNBOOK-CRM-LEADS.md): marketing y operaciones conservan leads.manage solo para crear el lead al registrar a un interesado; nunca quedan como dueñas.
   "leads.view": ALL_ROLES,
   "leads.manage": ["sales", "ceo", "operations", "clinical_director", "marketing"],
   "contacts.import": ["sales", "ceo", "operations", "marketing"],
   "campaigns.send": ["marketing", "ceo", "operations"],
+  // Comunidades: operan operaciones, marketing y dirección; solo dirección aprueba los mensajes base.
+  "communities.operate": ["operations", "marketing", "ceo"],
+  "communities.approve_messages": ["ceo"],
 } as const satisfies Record<string, readonly OpsRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

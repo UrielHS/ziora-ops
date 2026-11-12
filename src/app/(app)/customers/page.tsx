@@ -8,7 +8,7 @@ import { Badge, btn, Card, cn, Empty, Field, inputCls, Kpi, PageHeader, PanelHea
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
-import { appUserDaily, appUsers, followups, planPrices } from "@/db/schema";
+import { appUserDaily, appUsers, communities, followups, planPrices } from "@/db/schema";
 import { ACTIVE_DAYS, estimatedMrr, isActive, isPaying, payState, realMrr, summarizeByPlan, type PayState } from "@/domain/app-users";
 import { fmtDate, money, relative } from "@/lib/format";
 import { BILLING_PERIOD, HEALTH } from "@/lib/labels";
@@ -44,7 +44,7 @@ function statusTone(s: string, active: boolean) {
   return active ? "green" as const : "gray" as const;
 }
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; plan?: string; estado?: string; p?: string; orden?: string; dir?: string }> }) {
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; plan?: string; estado?: string; p?: string; orden?: string; dir?: string; origen?: string }> }) {
   const sp = await searchParams;
   const access = await requirePagePermission("customers.view");
   const showRevenue = can(access, "revenue.view");
@@ -66,9 +66,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   if (sp.estado === "activo") where.push(gte(appUsers.lastActiveAt, activeSince));
   if (sp.estado === "inactivo") where.push(or(lt(appUsers.lastActiveAt, activeSince), isNull(appUsers.lastActiveAt))!);
   if (sp.plan) where.push(eq(appUsers.plan, sp.plan));
+  if (sp.origen === "comunidad") where.push(or(isNotNull(appUsers.communityId), sql`${appUsers.attribution}->>'utm_medium' = 'comunidad'`, eq(appUsers.trialKind, "community"))!);
   if (sp.q) where.push(or(ilike(appUsers.email, `%${sp.q}%`), ilike(appUsers.name, `%${sp.q}%`))!);
 
-  const [users, team, prices, rows, [{ total }], trend, [lastSync], lastHealth, [{ hiddenTest }]] = await Promise.all([
+  const [users, team, prices, rows, [{ total }], trend, [lastSync], lastHealth, [{ hiddenTest }], communityRows] = await Promise.all([
     db.select().from(appUsers).where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false))),
     listUsers(),
     db.select().from(planPrices).orderBy(asc(planPrices.plan)),
@@ -83,7 +84,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       .from(followups).where(and(eq(followups.status, "done"), isNotNull(followups.health), isNotNull(followups.appUserUid)))
       .orderBy(followups.appUserUid, desc(followups.completedAt)),
     db.select({ hiddenTest: sql<number>`count(*)::int` }).from(appUsers).where(and(eq(appUsers.isTest, true), isNull(appUsers.removedAt))),
+    db.select({ id: communities.id, name: communities.name }).from(communities),
   ]);
+  const communityName = new Map(communityRows.map((c) => [c.id, c.name]));
 
   const byPlan = summarizeByPlan(users, prices, now);
   const active = users.filter((u) => isActive(u.lastActiveAt, now)).length;
@@ -99,7 +102,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     : withReal ? `Stripe en ${withReal} cuentas; el resto plan × precio` : "Plan × precio; falta conectar pagos";
   const maxTrend = Math.max(1, ...trend.map((t) => t.users));
   const qs = (patch: Record<string, string | undefined>) => {
-    const p = new URLSearchParams(Object.entries({ q: sp.q, plan: sp.plan, estado: sp.estado, orden: sp.orden, dir: sp.dir, ...patch }).filter(([, v]) => v) as [string, string][]);
+    const p = new URLSearchParams(Object.entries({ q: sp.q, plan: sp.plan, estado: sp.estado, orden: sp.orden, dir: sp.dir, origen: sp.origen, ...patch }).filter(([, v]) => v) as [string, string][]);
     return `/customers?${p}`;
   };
   // Encabezado ordenable: primer clic ordena por esa columna (sentido por defecto), el segundo invierte.
@@ -180,8 +183,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         <form action="/customers" className="flex flex-wrap items-center gap-2 px-5 pt-5">
           <input name="q" defaultValue={sp.q} placeholder="Buscar por correo o nombre" className={cn(inputCls, "max-w-xs rounded-full")} />
           {sp.plan && <input type="hidden" name="plan" value={sp.plan} />}
+          {sp.origen && <input type="hidden" name="origen" value={sp.origen} />}
           <Select name="estado" defaultValue={sp.estado} placeholder="Todos" className="w-36" options={[["activo", "Activos"], ["inactivo", "Inactivos"], ["baja", "Dados de baja"], ["prueba", "Cuentas de prueba"]]} />
           <button className={btn("ghost", "sm")}>Filtrar</button>
+          <Link href={qs({ origen: sp.origen === "comunidad" ? undefined : "comunidad", p: undefined })} className={cn(btn(sp.origen === "comunidad" ? "secondary" : "ghost", "sm"))}>Origen: comunidad</Link>
           <span className="ml-auto text-xs text-faint">{total} usuarios</span>
         </form>
         <div className="mt-3 overflow-x-auto">
@@ -199,7 +204,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 const real = realMrr(u);
                 return (
                   <tr key={u.uid} className="border-b border-[#EFEDE6] last:border-b-0">
-                    <td className="px-5 py-2.5"><span className="block font-semibold">{u.name ?? "—"}</span><span className="block text-xs text-muted">{u.email}</span></td>
+                    <td className="px-5 py-2.5"><span className="block font-semibold">{u.name ?? "—"}</span><span className="block text-xs text-muted">{u.email}</span>
+                      {(u.communityId || u.attribution?.utm_medium === "comunidad") && (
+                        <Badge tone="green">{u.communityId ? `Comunidad: ${communityName.get(u.communityId) ?? "—"}` : "Página /comunidad"}</Badge>
+                      )}
+                      {u.trialKind === "community" && (
+                        <Badge tone="amber">Prueba de comunidad{u.trialEndsAt ? ` · vence ${fmtDate(u.trialEndsAt, { day: "numeric", month: "short", year: "2-digit" })}` : ""}</Badge>
+                      )}</td>
                     <td className="px-2">{prices.find((p) => p.plan === u.plan)?.label ?? u.plan}</td>
                     <td className="px-2">{u.removedAt ? <Badge tone="gray">Baja</Badge> : <Badge tone={statusTone(u.status, act)}>{statusLabel(u.status)}{u.cancelAtPeriodEnd && !/cancel/i.test(u.status) ? " · cancela al cierre" : ""}{!act && !/cancel/i.test(u.status) ? " · inactivo" : ""}</Badge>}</td>
                     <td className="px-2">

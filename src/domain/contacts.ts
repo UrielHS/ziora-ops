@@ -51,6 +51,12 @@ type UpsertInput = {
   details?: Record<string, unknown>;
   eventOpsContactId?: string | null;
   marketingOptIn?: { source: string; evidence?: string } | null;
+  // Atribución de comunidades. Solo llenan lo vacío, como el resto.
+  utm?: Record<string, string>;
+  communityId?: string | null;
+  communityPostId?: string | null;
+  registeredById?: string | null;
+  leadRegisteredAt?: Date | null;
 };
 
 const TAGS = new Set<string>(contactTagEnum.enumValues);
@@ -122,6 +128,9 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
         statusChangedAt: existing.leadStatus || !input.leadStatus ? existing.statusChangedAt : new Date(),
         priority: fill(existing.priority, input.priority), segment: fill(existing.segment, input.segment),
         ownerId: fill(existing.ownerId, input.ownerId),
+        utm: Object.keys(existing.utm ?? {}).length ? existing.utm : (input.utm ?? {}),
+        communityId: fill(existing.communityId, input.communityId), communityPostId: fill(existing.communityPostId, input.communityPostId),
+        registeredById: fill(existing.registeredById, input.registeredById), leadRegisteredAt: fill(existing.leadRegisteredAt, input.leadRegisteredAt),
         // Lo que ya tenía gana sobre lo importado.
         details: sql`${JSON.stringify({ ...(input.details ?? {}), ...extra })}::jsonb || ${contacts.details}`,
       }).where(eq(contacts.id, id));
@@ -135,6 +144,8 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
         eventOpsContactId: input.eventOpsContactId ?? null,
         leadStatus: input.leadStatus ?? null, statusChangedAt: input.leadStatus ? new Date() : null,
         priority: input.priority ?? null, segment: input.segment ?? null, ownerId: input.ownerId ?? null,
+        utm: input.utm ?? {}, communityId: input.communityId ?? null, communityPostId: input.communityPostId ?? null,
+        registeredById: input.registeredById ?? null, leadRegisteredAt: input.leadRegisteredAt ?? null,
       }).returning({ id: contacts.id });
       id = row.id;
     }

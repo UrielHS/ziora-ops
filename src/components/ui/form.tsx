@@ -50,15 +50,15 @@ export function Modal({
   );
 }
 
-export function Submit({ children, variant = "primary", className, name, value }: {
+export function Submit({ children, variant = "primary", className, name, value, disabled }: {
   children: React.ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; className?: string;
   /** Para formularios con varios botones: el servidor recibe name=value del botón presionado. */
-  name?: string; value?: string;
+  name?: string; value?: string; disabled?: boolean;
 }) {
   const status = useFormStatus();
   const pending = useContext(PendingCtx) || status.pending;
   return (
-    <button type="submit" name={name} value={value} disabled={pending} className={cn(btn(variant), className)}>
+    <button type="submit" name={name} value={value} disabled={pending || disabled} className={cn(btn(variant), className)}>
       {pending ? "Guardando…" : children}
     </button>
   );

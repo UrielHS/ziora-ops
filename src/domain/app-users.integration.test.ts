@@ -100,4 +100,47 @@ describeDb("usuarios de la app y seguimiento 1:1", async () => {
     await f.suggestFollowups(db, now); // "yo" no entra hace 9 días y paga: sería candidata si no fuera de prueba
     expect(await db.select().from(followups).where(eq(followups.appUserUid, `yo-${tag}`))).toHaveLength(0);
   });
+  it("el usuario queda ligado a su comunidad y post por utm_term, y la atribución no se pierde", async () => {
+    const { communities, communityPosts } = await import("@/db/schema");
+    const t = Date.now().toString(36);
+    const [community] = await db.insert(communities).values({ name: `Grupo ${t}`, platform: "facebook", url: `https://fb.com/${t}-a`, slug: `au-grupo-${t}` }).returning();
+    const code = ("k" + t).slice(-6).replace(/[^a-hj-km-np-z2-9]/g, "k").padStart(6, "k");
+    const [post] = await db.insert(communityPosts).values({ code, communityId: community.id }).returning();
+    const uid = `v2-${t}`;
+    const base = { uid, email: `${uid}@example.com`, plan: "free", status: "free", patientCount: 0, sessionsLast30d: 0 };
+    const attribution = { utm_medium: "comunidad", utm_campaign: "prueba-1-mes-202611", utm_term: code, utm_content: community.slug };
+    await applySnapshot(db, { generatedAt: now.toISOString(), users: [{ ...base, attribution, trialKind: "community", hasPaidInvoice: false, feedbackCount: 1, sessionsTotal: 3, notesTotal: 2 }] }, now);
+    let [row] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(row).toMatchObject({ trialKind: "community", communityId: community.id, communityPostId: post.id, hasPaidInvoice: false, feedbackCount: 1, sessionsTotal: 3, notesTotal: 2 });
+    expect(row.attribution).toEqual(attribution);
+    // segundo snapshot sin atribución ni tipo de prueba (v1) → se conserva todo
+    await applySnapshot(db, { generatedAt: now.toISOString(), users: [base] }, now);
+    [row] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(row).toMatchObject({ trialKind: "community", communityId: community.id, communityPostId: post.id, sessionsTotal: 3, hasPaidInvoice: false });
+    expect(row.attribution).toEqual(attribution);
+    await applySnapshot(db, { generatedAt: now.toISOString(), users: [{ ...base, attribution: null, trialKind: null, sessionsTotal: 5, notesTotal: 2, feedbackCount: 1 }] }, now);
+    [row] = await db.select().from(appUsers).where(eq(appUsers.uid, uid));
+    expect(row).toMatchObject({ trialKind: "community", sessionsTotal: 5 });
+    expect(row.attribution).toEqual(attribution);
+  });
+
+  it("sin post, liga por utm_content; entrada directa queda sin comunidad", async () => {
+    const { communities } = await import("@/db/schema");
+    const t = Date.now().toString(36);
+    const [community] = await db.insert(communities).values({ name: `Grupo ${t}`, platform: "whatsapp", url: `https://wa.me/${t}-b`, slug: `au-slug-${t}` }).returning();
+    const a = `slug-${t}`, b = `directo-${t}`, c = `otro-${t}`;
+    const mk = (uid: string, attribution: Record<string, string>) => ({ uid, email: `${uid}@example.com`, plan: "free", status: "free", patientCount: 0, sessionsLast30d: 0, attribution, trialKind: "community" });
+    await applySnapshot(db, { generatedAt: now.toISOString(), users: [
+      mk(a, { utm_medium: "comunidad", utm_content: community.slug }),
+      mk(b, { utm_source: "directo", utm_medium: "comunidad", utm_campaign: "prueba-1-mes-202611" }),
+      // utm_content coincide con la slug de una comunidad, pero no viene de una liga de comunidad: no se liga.
+      mk(c, { utm_medium: "cpc", utm_content: community.slug }),
+    ] }, now);
+    const [ra] = await db.select().from(appUsers).where(eq(appUsers.uid, a));
+    const [rb] = await db.select().from(appUsers).where(eq(appUsers.uid, b));
+    expect(ra).toMatchObject({ communityId: community.id, communityPostId: null });
+    const [rc] = await db.select().from(appUsers).where(eq(appUsers.uid, c));
+    expect(rc.communityId).toBeNull();
+    expect(rb).toMatchObject({ communityId: null, communityPostId: null, trialKind: "community" });
+  });
 });

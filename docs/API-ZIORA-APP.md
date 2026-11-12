@@ -84,7 +84,7 @@ POST /ops/snapshot
 Content-Type: application/json
 X-Ops-Signature: 3f1c…(hex)
 
-{"requestedAt":"2026-11-05T18:00:00.000Z"}
+{"requestedAt":"2026-11-05T18:00:00.000Z","v":2}
 ```
 
 ### Validación
@@ -95,6 +95,7 @@ X-Ops-Signature: 3f1c…(hex)
 | `requestedAt` con más de 5 minutos de antigüedad o más de 1 minuto en el futuro | `401` (evita repeticiones) |
 | Correcta | `200` con el snapshot |
 
+- Versión 2: Ops manda `"v": 2` en el cuerpo (exactamente el entero 2). Solo entonces el usuario trae, además, `attribution` (objeto con `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `gclid`, `fbclid`, `ref`, texto ≤ 200, o `null`), `trialKind` (`"community"` o `null`), `hasPaidInvoice` (booleano: alguna suscripción con factura pagada > 0), `feedbackCount`, `sessionsTotal` y `notesTotal` (enteros ≥ 0). Sin `v: 2` la respuesta es idéntica a la v1. Ops guarda `attribution` y `trialKind` de forma permanente (null o vacío no los borran) y liga al usuario con su comunidad/post por `utm_term` (código del post) o `utm_content` (slug de la comunidad). Contrato completo en `ziora-gcp/docs/ZIORA-OPS-INTEGRACION.md`.
 - Sin sesión de usuario ni CORS. El endpoint no aparece en la documentación pública ni en OpenAPI.
 - Si el repo tiene rate limiting global, exceptúa esta ruta o dale un límite propio (1 petición por minuto basta).
 

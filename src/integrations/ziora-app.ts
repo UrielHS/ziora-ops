@@ -9,7 +9,7 @@ import { requireEnv } from "@/lib/env";
  */
 export async function fetchAppSnapshot() {
   const url = requireEnv("ZIORA_APP_SNAPSHOT_URL");
-  const body = JSON.stringify({ requestedAt: new Date().toISOString() });
+  const body = JSON.stringify({ requestedAt: new Date().toISOString(), v: 2 });
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", "x-ops-signature": hmacSha256Hex(requireEnv("ZIORA_APP_BRIDGE_SECRET"), body) },

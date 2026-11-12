@@ -4,12 +4,13 @@ import { eq } from "drizzle-orm";
 import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
 import { convertToAccountAction } from "@/actions/leads";
 import { ActionForm, Submit } from "@/components/ui/form";
+import { AttributionPanel } from "@/components/communities";
 import { CadencePanel, ChannelInvalidButton, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, MyLinks, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
-import { accountContacts, accounts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
+import { accountContacts, accounts, communities, communityPosts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
 import { loadCadence } from "@/domain/sequences";
 import { getSellerProfile, referralCodeFrom, referralLinkWithUtm, utmCampaignFor } from "@/domain/sellers";
@@ -39,6 +40,10 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
     getSellerProfile(db, access.user.id),
   ]);
   const cadence = cadenceMap.get(id);
+  // Atribución de comunidad: de qué grupo y post vino, con qué UTM y quién lo registró.
+  const hasAttribution = !!c.communityId || !!c.communityPostId || c.utm?.utm_medium === "comunidad";
+  const [attrCommunity] = c.communityId ? await db.select({ name: communities.name }).from(communities).where(eq(communities.id, c.communityId)) : [];
+  const [attrPost] = c.communityPostId ? await db.select({ code: communityPosts.code }).from(communityPosts).where(eq(communityPosts.id, c.communityPostId)) : [];
   const myLinks = myProfile ? {
     referral: myProfile.referralUrl ? referralLinkWithUtm(myProfile.referralUrl, { campaign: utmCampaignFor(c.source), code: referralCodeFrom(myProfile.referralUrl) }) : null,
     booking: myProfile.bookingUrl, discountCode: myProfile.discountCode,
@@ -124,6 +129,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             <Card>
               <PanelHeader title="Mis ligas y códigos" subtitle="Para pegar en el WhatsApp o el correo: tu liga de prueba (referido), tu calendario y los códigos de descuento." />
               <MyLinks links={myLinks} />
+            </Card>
+          )}
+
+          {hasAttribution && (
+            <Card>
+              <PanelHeader title="De dónde vino" subtitle="Comunidad y post que lo trajeron." />
+              <div className="pt-3">
+                <AttributionPanel
+                  communityId={c.communityId} communityName={attrCommunity?.name ?? null} postCode={attrPost?.code ?? c.utm?.utm_term ?? null}
+                  utm={c.utm ?? {}} registeredBy={users.find((u) => u.id === c.registeredById)?.name ?? null} registeredAt={c.leadRegisteredAt}
+                />
+              </div>
             </Card>
           )}
 

@@ -26,6 +26,15 @@ describe("snapshot de la app", () => {
     expect(at("semiannual")).toBe(true);
     expect(at("quarterly")).toBe(false);
   });
+  it("acepta un usuario v2 y sigue aceptando uno v1", () => {
+    const wrap = (u: unknown) => Snapshot.safeParse({ generatedAt: now.toISOString(), users: [u] }).success;
+    expect(wrap({ ...user, attribution: { utm_medium: "comunidad", utm_term: "k7m2qx" }, trialKind: "community", hasPaidInvoice: false, feedbackCount: 0, sessionsTotal: 3, notesTotal: 1 })).toBe(true);
+    expect(wrap({ ...user, attribution: null, trialKind: null })).toBe(true);
+    expect(wrap(user)).toBe(true);
+    expect(wrap({ ...user, attribution: { patientName: "x" } })).toBe(false); // el contrato sigue estricto
+    expect(wrap({ ...user, attribution: { utm_term: "x".repeat(201) } })).toBe(false);
+    expect(wrap({ ...user, sessionsTotal: -1 })).toBe(false);
+  });
   it("rechaza cualquier campo extra (protección de datos de pacientes)", () => {
     const r = Snapshot.safeParse({ generatedAt: now.toISOString(), users: [{ ...user, patients: [{ name: "X" }] }] });
     expect(r.success).toBe(false);

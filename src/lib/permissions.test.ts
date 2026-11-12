@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_ROLES, can } from "./permissions";
+import { ALL_ROLES, PERMISSIONS, can } from "./permissions";
 
 describe("can", () => {
   it("el admin de Event Ops puede todo", () => {
@@ -42,5 +42,12 @@ describe("can", () => {
     expect(can({ isAdmin: false, roles: ["sales"] }, "campaigns.send")).toBe(false);
     expect(can({ isAdmin: false, roles: ["marketing"] }, "campaigns.send")).toBe(true);
     expect(can({ isAdmin: true, roles: [] }, "leads.manage")).toBe(true);
+  });
+
+  it("comunidades: operan operaciones, marketing y dirección; solo dirección aprueba mensajes", () => {
+    expect(PERMISSIONS["communities.operate"]).toEqual(["operations", "marketing", "ceo"]);
+    expect(PERMISSIONS["communities.approve_messages"]).toEqual(["ceo"]);
+    expect(can({ isAdmin: false, roles: ["sales"] }, "communities.operate")).toBe(false);
+    expect(can({ isAdmin: false, roles: ["marketing"] }, "leads.manage")).toBe(true); // Pau y Ale crean el lead
   });
 });

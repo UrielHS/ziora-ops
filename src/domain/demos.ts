@@ -6,6 +6,7 @@ type DemoStage = (typeof demoStageEnum.enumValues)[number];
 import { listDemoEvents } from "@/integrations/google/calendar";
 import { requireEnv } from "@/lib/env";
 import { toCity, upsertContact } from "./contacts";
+import { resolveAttribution } from "./community-leads";
 import { parseDemoEvent, type ParsedDemoEvent } from "./demo-calendar";
 import { advanceLead, logActivity, SYSTEM_ACTOR, type Actor } from "./leads";
 import { fmtDateTime } from "@/lib/format";
@@ -45,7 +46,9 @@ export async function leadFromDemoStage(db: Db, contactId: string, stage: DemoSt
 
 /** Crea la demo y crea o completa el contacto en Ziora Ops. Idempotente por externalId. */
 export async function ingestDemo(db: Db, p: DemoInput) {
+  const attr = p.utm?.utm_medium === "comunidad" ? await resolveAttribution(db, p.utm) : { communityId: null, postId: null };
   const { id: contactId } = await upsertContact(db, {
+    utm: p.utm, communityId: attr.communityId, communityPostId: attr.postId,
     name: p.fullName,
     email: p.email,
     phone: p.whatsapp,

@@ -17,6 +17,7 @@ export const cityEnum = ops.enum("city", ["cdmx", "nyc", "gdl", "mty", "other", 
 export const contactSourceEnum = ops.enum("contact_source", [
   "manual", "demo_form", "ziora_app", "sheet_import", "csv_import", "event_ops",
   "facebook_group", "instagram", "linkedin", "referral",
+  "whatsapp_group", "telegram_group", "landing_comunidad",
 ]);
 export const contactTagEnum = ops.enum("contact_tag", [
   "psychologist", "lead", "clinic", "ziora_user",
@@ -68,6 +69,12 @@ export const contacts = ops.table(
     // Marcados a mano desde la ficha: el dato se conserva pero nadie (ni la cadencia) lo vuelve a usar.
     emailInvalidAt: timestamp("email_invalid_at", { withTimezone: true }),
     phoneInvalidAt: timestamp("phone_invalid_at", { withTimezone: true }),
+    // --- Atribución de comunidades (Fase 1)
+    utm: jsonb("utm").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
+    communityPostId: uuid("community_post_id").references(() => communityPosts.id, { onDelete: "set null" }),
+    registeredById: uuid("registered_by_id").references(() => users.id, { onDelete: "set null" }), // quién registró al interesado
+    leadRegisteredAt: timestamp("lead_registered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
@@ -677,6 +684,15 @@ export const appUsers = ops.table(
     // Cuenta de prueba o interna (la marca el equipo en Usuarios de Ziora): no se muestra ni cuenta en métricas,
     // MRR ni seguimientos. La sincronización nunca la cambia.
     isTest: boolean("is_test").notNull().default(false),
+    // Atribución y actividad (snapshot v2 de la app)
+    attribution: jsonb("attribution").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    trialKind: text("trial_kind"), // 'community' o null
+    communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
+    communityPostId: uuid("community_post_id").references(() => communityPosts.id, { onDelete: "set null" }),
+    hasPaidInvoice: boolean("has_paid_invoice"), // null = la app no lo mandó
+    feedbackCount: integer("feedback_count").notNull().default(0),
+    sessionsTotal: integer("sessions_total").notNull().default(0),
+    notesTotal: integer("notes_total").notNull().default(0),
   },
   (t) => [index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email), index("app_users_referred_by_code_idx").on(t.referredByCode)],
 );
@@ -837,3 +853,111 @@ export const sellerProfiles = ops.table("seller_profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 export type SellerProfile = typeof sellerProfiles.$inferSelect;
+
+// ---------- comunidades (Fase 1): grupos, membresías, campañas, mensajes base y posts ----------
+export const communityPlatformEnum = ops.enum("community_platform", [
+  "facebook", "whatsapp", "telegram", "linkedin", "reddit", "discord", "asociacion", "otro",
+]);
+export const communityPromoPolicyEnum = ops.enum("community_promo_policy", ["desconocido", "si", "no", "permiso_admin", "dias_especificos"]);
+export const communityStatusEnum = ops.enum("community_status", ["por_revisar", "aprobada", "activa", "pausada", "sin_promocion", "descartada"]);
+export const communityKindEnum = ops.enum("community_kind", ["grupo", "alianza"]);
+export const membershipStatusEnum = ops.enum("membership_status", ["por_solicitar", "solicitud_enviada", "unida", "rechazada", "nos_sacaron", "salio"]);
+export const baseMessageStatusEnum = ops.enum("base_message_status", ["borrador", "aprobado", "retirado"]);
+export const communityPostStatusEnum = ops.enum("community_post_status", ["planeado", "publicado", "omitido", "espera_admin", "borrado_admin"]);
+
+export const communities = ops.table(
+  "communities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    platform: communityPlatformEnum("platform").notNull(),
+    url: text("url").notNull(),
+    country: text("country"),
+    cityRegion: text("city_region"),
+    topic: text("topic"),
+    sizeApprox: text("size_approx"),
+    accessType: text("access_type"),
+    promoPolicy: communityPromoPolicyEnum("promo_policy").notNull().default("desconocido"),
+    rulesText: text("rules_text"),
+    activity: text("activity"),
+    phase: integer("phase"),
+    priority: text("priority"), // A | B | C
+    slug: text("slug").notNull(),
+    kind: communityKindEnum("kind").notNull().default("grupo"),
+    status: communityStatusEnum("status").notNull().default("por_revisar"),
+    discardReason: text("discard_reason"),
+    origin: text("origin"), // tavily_2026_11 | recomendada | manual
+    recommendedBy: text("recommended_by"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    score: integer("score").notNull().default(0),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("communities_url_unique").on(t.url), uniqueIndex("communities_slug_unique").on(t.slug), index("communities_status_idx").on(t.status)],
+);
+
+export const communityMemberships = ops.table(
+  "community_memberships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    communityId: uuid("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    status: membershipStatusEnum("status").notNull().default("por_solicitar"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }),
+    leftAt: timestamp("left_at", { withTimezone: true }),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("community_memberships_unique").on(t.communityId, t.userId)],
+);
+
+export const communityCampaigns = ops.table("community_campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  trialDays: integer("trial_days").notNull().default(30),
+  paidGoal: integer("paid_goal").notNull().default(10),
+  seatLimit: integer("seat_limit"),
+  active: boolean("active").notNull().default(true),
+});
+
+export const baseMessages = ops.table("base_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(), // M0, M1…
+  angle: text("angle"),
+  body: text("body").notNull(),
+  isPost: boolean("is_post").notNull().default(true),
+  status: baseMessageStatusEnum("status").notNull().default("borrador"),
+  approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  version: integer("version").notNull().default(1),
+});
+
+export const communityPosts = ops.table(
+  "community_posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(), // código corto de la liga /c/<código>
+    campaignId: uuid("campaign_id").references(() => communityCampaigns.id, { onDelete: "set null" }),
+    communityId: uuid("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
+    publisherId: uuid("publisher_id").references(() => users.id, { onDelete: "set null" }),
+    baseMessageId: uuid("base_message_id").references(() => baseMessages.id, { onDelete: "set null" }),
+    aiDraft: text("ai_draft"),
+    finalText: text("final_text"),
+    scheduledOn: date("scheduled_on"),
+    status: communityPostStatusEnum("status").notNull().default("planeado"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    postUrl: text("post_url"),
+    skipReason: text("skip_reason"),
+    clicks: integer("clicks").notNull().default(0),
+    passedFilter: boolean("passed_filter"),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("community_posts_code_unique").on(t.code), index("community_posts_community_published_idx").on(t.communityId, t.publishedAt)],
+);
+export type Community = typeof communities.$inferSelect;
+export type CommunityPost = typeof communityPosts.$inferSelect;

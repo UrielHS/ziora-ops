@@ -113,6 +113,13 @@
       "when": 1794276626759,
       "tag": "0015_vendedor",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794466532066,
+      "tag": "0016_comunidades",
+      "breakpoints": true
     }
   ]
 }

@@ -50,7 +50,20 @@ createServer((req, res) => {
       res.writeHead(401).end(JSON.stringify({ error: "no autorizado" }));
       return;
     }
-    const out = JSON.stringify({ generatedAt: new Date().toISOString(), users });
+    // Con "v": 2 el backend añade atribución y señales de uso; sin ella responde exactamente como v1.
+    const v2 = (() => { try { return JSON.parse(body).v === 2; } catch { return false; } })();
+    const out = JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      users: v2
+        ? users.map((u, i) => ({
+            ...u,
+            attribution: i % 5 === 0 ? { utm_source: "facebook", utm_medium: "comunidad", utm_campaign: "prueba-1-mes-202611" } : null,
+            trialKind: i % 5 === 0 ? "community" : null,
+            hasPaidInvoice: u.status === "active" && u.plan !== "free",
+            feedbackCount: i % 7 === 0 ? 1 : 0, sessionsTotal: (i * 13) % 120, notesTotal: (i * 5) % 60,
+          }))
+        : users,
+    });
     res.writeHead(200, { "content-type": "application/json", "x-ops-signature": hmacSha256Hex(secret, out) }).end(out);
   });
 }).listen(5055, () => console.log("/ops/snapshot falso en http://localhost:5055/ops/snapshot"));
