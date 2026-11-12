@@ -13,6 +13,21 @@ describe("social-leads", () => {
       expect(normalizeHandle(raw)).toBeNull();
     }
   });
+  it("normalizeHandle: usuarios con punto que parecen dominio no se pierden", () => {
+    for (const h of ["dra.lopez", "psic.ana", "terapia.mx"]) {
+      for (const raw of [h, `@${h}`, `${h}/`, h.toUpperCase(), `https://www.instagram.com/${h}/`, `instagram.com/${h}?igsh=x`, `https://www.tiktok.com/@${h}?lang=es`]) {
+        expect(normalizeHandle(raw)).toBe(h);
+      }
+    }
+  });
+  it("normalizeHandle: otras redes se rechazan; facebook.com a secas es un usuario sintácticamente válido", () => {
+    expect(normalizeHandle("https://facebook.com/alguien")).toBeNull();
+    expect(normalizeHandle("facebook.com/alguien")).toBeNull();
+    expect(normalizeHandle("https://facebook.com")).toBeNull();
+    expect(normalizeHandle("https://www.instagram.com")).toBeNull();
+    expect(normalizeHandle("instagram.com")).toBeNull();
+    expect(normalizeHandle("facebook.com")).toBe("facebook.com");
+  });
   it("socialProfileUrl", () => {
     expect(socialProfileUrl("instagram", "psic.ana_01")).toBe("https://www.instagram.com/psic.ana_01/");
     expect(socialProfileUrl("tiktok", "psic.ana_01")).toBe("https://www.tiktok.com/@psic.ana_01");

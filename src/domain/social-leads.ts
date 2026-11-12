@@ -19,7 +19,9 @@ const SOCIAL_HOST_RE = /^(?:[a-z0-9-]+\.)*(?:instagram|tiktok)\.com$/;
 export function normalizeHandle(raw: string | null | undefined): string | null {
   let s = (raw ?? "").trim();
   if (!s) return null;
-  if (/^(?:https?:\/\/)?[^\s/@]+\.[a-z]{2,}(?:[/?#]|$)/i.test(s)) {
+  // Solo es URL si trae esquema o su host es instagram.com / tiktok.com; "dra.lopez" o "terapia.mx" son usuarios, no dominios.
+  const hostPart = s.replace(/^https?:\/\//i, "").split(/[/?#]/)[0].toLowerCase();
+  if (/^https?:\/\//i.test(s) || SOCIAL_HOST_RE.test(hostPart)) {
     let url: URL;
     try { url = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`); } catch { return null; }
     if (!SOCIAL_HOST_RE.test(url.hostname.toLowerCase())) return null;
