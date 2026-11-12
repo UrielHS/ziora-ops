@@ -9,7 +9,8 @@ import { contacts } from "@/db/schema";
 import { shortLink } from "@/domain/community-posts";
 import { defaultMessage, todayBuckets } from "@/domain/leads";
 import { dmCounts, dmFor, dmLead, dmsSentToday, loadDmMessages } from "@/domain/social-dm";
-import { ensureInviteLink, loadLinks } from "@/domain/social-links";
+import { loadLinks } from "@/domain/social-links";
+import { can } from "@/lib/permissions";
 import { waMessageLink } from "@/domain/phone";
 import { loadCadence } from "@/domain/sequences";
 import { todayISO } from "@/lib/format";
@@ -37,9 +38,7 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
   const [sentCounts, links, dmMessages, sentToday] = await Promise.all([
     dmCounts(db, socialIds), loadLinks(db, socialIds), loadDmMessages(db), dmsSentToday(db, access.user.id),
   ]);
-  for (const id of socialIds) {
-    if (!links.get(id)?.invite) links.set(id, { ...links.get(id), invite: await ensureInviteLink(db, id, access.user.id) });
-  }
+  const canManage = can(access, "leads.manage");
   const myFirstName = access.user.name.trim().split(/\s+/)[0] ?? access.user.name;
 
   const { due, soon, noPlan, inSequence } = todayBuckets(rows, cadence, today, weekEnd);
@@ -48,7 +47,8 @@ export default async function LeadsTodayPage({ searchParams }: { searchParams: P
     if (c.socialHandle) {
       const invite = links.get(c.id)?.invite;
       const dm = dmFor(dmLead(c), sentCounts.get(c.id) ?? 0, dmMessages, { yo: myFirstName, liga: invite ? shortLink(invite.code) : "" });
-      return <SocialTodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} dm={dm} />;
+      // Mi día solo lee: sin liga no hay texto copiable; la ficha (con permiso de gestión) la genera.
+      return <SocialTodayRow key={c.id} c={c} owner={ownerName(c.ownerId)} dm={dm} canManage={canManage} noLink={!invite} />;
     }
     const cad = cadence.get(c.id);
     // Si la secuencia dejó un WhatsApp listo, el enlace de WhatsApp lleva ese texto.

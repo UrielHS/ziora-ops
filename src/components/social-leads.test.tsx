@@ -53,8 +53,25 @@ describe("SocialPanel", () => {
 });
 
 describe("SocialTodayRow", () => {
+  const dm1 = { key: "RI1", step: 1 as const, text: "Hola, Ana…" };
+  it("sin permiso de gestión no hay botones de acción", () => {
+    const html = render(<SocialTodayRow c={lead} owner="Ale" dm={dm1} canManage={false} />);
+    for (const t of ["Le escribí", "Respondió", "Perdido", "Posponer", "Copiar mensaje y abrir perfil"]) expect(html).not.toContain(t);
+  });
+  it("sin liga no ofrece copiar ni registrar, pero deja marcar Respondió", () => {
+    const html = render(<SocialTodayRow c={lead} owner="Ale" dm={dm1} canManage noLink />);
+    expect(html).toContain("Abre la ficha para generar su liga");
+    expect(html).not.toContain("Hola, Ana…");
+    expect(html).not.toContain("Copiar mensaje y abrir perfil");
+    expect(html).not.toContain("Le escribí");
+    expect(html).toContain("Respondió");
+  });
+  it("tras tres mensajes sigue pudiendo marcar Respondió", () => {
+    expect(render(<SocialTodayRow c={lead} owner="Ale" dm={null} canManage />)).toContain("Respondió");
+    expect(render(<SocialPanel c={lead} dm={null} inviteUrl={url} promoUrl={null} canManage />)).toContain("Respondió");
+  });
   it("muestra perfil, mensaje y acciones", () => {
-    const html = render(<SocialTodayRow c={lead} owner="Ale" dm={{ key: "RI1", step: 1, text: "Hola, Ana…" }} />);
+    const html = render(<SocialTodayRow c={lead} owner="Ale" dm={dm1} canManage />);
     expect(html).toContain("https://www.instagram.com/psic.ana/");
     expect(html).toContain("Hola, Ana…");
     expect(html).toContain("Le escribí");

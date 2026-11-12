@@ -35,10 +35,12 @@ export function OpenProfileButton({ url, text }: { url: string; text: string }) 
         onClick={() => {
           // window.open va primero y síncrono: después del await el navegador bloquearía la ventana.
           window.open(url, "_blank", "noopener");
-          navigator.clipboard.writeText(text).then(
-            () => setNote("Mensaje copiado"),
-            () => setNote("Copia el mensaje con el botón Copiar"),
-          );
+          const fail = () => setNote("Copia el mensaje con el botón Copiar");
+          try {
+            navigator.clipboard.writeText(text).then(() => setNote("Mensaje copiado"), fail);
+          } catch {
+            fail();
+          }
         }}
       >
         <ExternalLink className="h-3.5 w-3.5" /> Copiar mensaje y abrir perfil
@@ -49,29 +51,38 @@ export function OpenProfileButton({ url, text }: { url: string; text: string }) 
 }
 
 /** Mensaje del paso: texto, Copiar y los botones de registro. */
-function DmBlock({ c, dm, canManage, rows }: { c: Lead; dm: DmView; canManage: boolean; rows: number }) {
+function DmBlock({ c, dm, canManage, rows, noLink }: { c: Lead; dm: DmView; canManage: boolean; rows: number; noLink?: boolean }) {
   const url = profileUrl(c);
-  if (!dm) return <p className="text-sm text-muted">Ya se mandaron los tres mensajes. Si no responde, márcalo perdido.</p>;
+  // Sin liga el texto tendría un hueco: no se ofrece copiarlo ni registrar el DM.
+  const usable = !!dm && !noLink;
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="label">{STEP_LABEL[dm.step]}</p>
-          {dm.text && <CopyButton text={dm.text} />}
+      {!dm ? (
+        <p className="text-sm text-muted">Ya se mandaron los tres mensajes. Si no responde, márcalo perdido.</p>
+      ) : (
+        <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="label">{STEP_LABEL[dm.step]}</p>
+            {dm.text && !noLink && <CopyButton text={dm.text} />}
+          </div>
+          {noLink ? (
+            <p className="mt-1 text-sm text-muted">Abre la ficha para generar su liga</p>
+          ) : dm.text ? (
+            <textarea readOnly value={dm.text} rows={rows} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
+          ) : (
+            <p className="mt-1 text-sm text-muted">Este mensaje aún no está aprobado por dirección</p>
+          )}
         </div>
-        {dm.text ? (
-          <textarea readOnly value={dm.text} rows={rows} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
-        ) : (
-          <p className="mt-1 text-sm text-muted">Este mensaje aún no está aprobado por dirección</p>
-        )}
-      </div>
+      )}
       {canManage && (
         <div className="flex flex-wrap items-start gap-2">
-          {dm.text && url && <OpenProfileButton url={url} text={dm.text} />}
-          <ActionForm action={recordDmAction} className="contents">
-            <input type="hidden" name="id" value={c.id} />
-            <Submit variant="secondary" className="!py-1.5 !text-xs">Le escribí</Submit>
-          </ActionForm>
+          {usable && dm.text && url && <OpenProfileButton url={url} text={dm.text} />}
+          {usable && (
+            <ActionForm action={recordDmAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <Submit variant="secondary" className="!py-1.5 !text-xs">Le escribí</Submit>
+            </ActionForm>
+          )}
           <ActionForm action={markRepliedAction} className="contents">
             <input type="hidden" name="id" value={c.id} />
             <Submit variant="primary" className="!py-1.5 !text-xs">Respondió</Submit>
@@ -140,7 +151,7 @@ export function SocialPanel({ c, dm, inviteUrl, promoUrl, canManage, inviteClick
 }
 
 /** Fila de «Mi día» para un lead de redes: perfil, mensaje del paso y las acciones del día. */
-export function SocialTodayRow({ c, owner, dm }: { c: Lead; owner?: string | null; dm: DmView }) {
+export function SocialTodayRow({ c, owner, dm, canManage, noLink }: { c: Lead; owner?: string | null; dm: DmView; canManage: boolean; noLink?: boolean }) {
   const overdue = !!c.nextActionOn && c.nextActionOn < todayISO();
   const url = profileUrl(c);
   return (
@@ -159,8 +170,8 @@ export function SocialTodayRow({ c, owner, dm }: { c: Lead; owner?: string | nul
           <CalendarClock className="h-3.5 w-3.5" />{c.nextAction}{c.nextActionOn && <span>· {fmtDate(c.nextActionOn)}</span>}
         </p>
       )}
-      <DmBlock c={c} dm={dm} canManage rows={3} />
-      <div className="flex flex-wrap items-center gap-2">
+      <DmBlock c={c} dm={dm} canManage={canManage} rows={3} noLink={noLink} />
+      {canManage && <div className="flex flex-wrap items-center gap-2">
         <ActionForm action={postponeAction} className="contents">
           <input type="hidden" name="id" value={c.id} />
           <span className="text-[11px] text-muted">Posponer</span>
@@ -174,7 +185,7 @@ export function SocialTodayRow({ c, owner, dm }: { c: Lead; owner?: string | nul
             <Submit variant="danger">Marcar perdido</Submit>
           </ActionForm>
         </Modal>
-      </div>
+      </div>}
     </div>
   );
 }
