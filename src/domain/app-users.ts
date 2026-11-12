@@ -168,6 +168,7 @@ export async function linkCommunities(db: Db) {
     .where(and(isNull(appUsers.communityId), isNotNull(appUsers.attribution), sql`${appUsers.attribution} <> '{}'::jsonb`));
   const cache = new Map<string, Awaited<ReturnType<typeof resolveAttribution>>>();
   for (const p of pending) {
+    if (p.attribution.utm_medium !== "comunidad") continue;
     const key = `${p.attribution.utm_term ?? ""}|${p.attribution.utm_content ?? ""}`;
     let r = cache.get(key);
     if (!r) { r = await resolveAttribution(db, p.attribution); cache.set(key, r); }

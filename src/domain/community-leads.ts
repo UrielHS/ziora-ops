@@ -6,7 +6,7 @@ import { users } from "@/db/shared";
 import { notifyTeam } from "@/integrations/notify";
 import { normalizeEmail, upsertContact } from "./contacts";
 import { CODE_RE, postUtm } from "./community-posts";
-import { logActivity, type Actor } from "./leads";
+import { logActivity, SYSTEM_ACTOR, type Actor } from "./leads";
 import { normalizePhoneE164 } from "./phone";
 
 export const LEAD_RR_KEY = "community_lead_rr";
@@ -65,6 +65,7 @@ export async function registerInterested(
   const phone = input.phone?.trim() || null;
   const phoneE164 = normalizePhoneE164(phone);
   const profileUrl = input.profileUrl?.trim() || null;
+  if (phone && !phoneE164 && !email && !profileUrl) throw new Error("Teléfono no válido");
   if (!email && !phoneE164 && !profileUrl) throw new Error("Indica correo, teléfono o perfil del interesado");
 
   const [post] = await db.select().from(communityPosts).where(eq(communityPosts.id, input.postId)).limit(1);
@@ -84,6 +85,8 @@ export async function registerInterested(
   const alreadyWorked = !!existing && (!!existing.ownerId || !!existing.leadRegisteredAt);
 
   const ownerId = alreadyWorked ? existing!.ownerId : await db.transaction((tx) => assignCommunityLeadOwner(tx));
+  // Sin reparto configurado, un lead con fecha de registro y sin dueño no volvería a entrar a la rotación.
+  if (!alreadyWorked && !ownerId) throw new Error("Reparto de leads no configurado");
   const registration = alreadyWorked ? {} : { registeredById: actor.userId, leadRegisteredAt: now, ownerId };
   const source = PLATFORM_SOURCE[community.platform] ?? ("manual" as ContactSource);
   const tags = KIND_TAGS[input.kind];
@@ -146,12 +149,20 @@ export async function ingestCommunityCapture(
   const [existing] = await db.select({ ownerId: contacts.ownerId, leadRegisteredAt: contacts.leadRegisteredAt }).from(contacts).where(eq(contacts.email, normalizeEmail(p.email))).limit(1);
   const alreadyWorked = !!existing && (!!existing.ownerId || !!existing.leadRegisteredAt);
   const ownerId = alreadyWorked ? null : await db.transaction((tx) => assignCommunityLeadOwner(tx));
+  // Sin reparto configurado se guarda sin dueño ni fecha de registro, para poder asignarlo después (sin PII en el log).
+  if (!alreadyWorked && !ownerId) console.warn("[comunidades] reparto de leads no configurado: captura guardada sin dueño");
+  const assigned = !alreadyWorked && !!ownerId;
   const { id, created } = await upsertContact(db, {
     name: p.fullName, email: p.email, source: "landing_comunidad", tags: ["psychologist", "lead"], leadStatus: "nuevo",
     notes: p.note ?? null, utm: p.utm, communityId: attr.communityId, communityPostId: attr.postId,
     details: p.externalId ? { externalId: p.externalId } : {},
-    ...(alreadyWorked ? {} : { ownerId, leadRegisteredAt: now }),
+    ...(assigned ? { ownerId, leadRegisteredAt: now } : {}),
   });
-  if (!alreadyWorked) await notifyOwner(db, ownerId, id, "Una persona se registró desde la página de comunidad.");
+  await logActivity(db, {
+    contactId: id, type: "sistema", actor: SYSTEM_ACTOR, occurredAt: now,
+    summary: "Registro desde la página de comunidad",
+    meta: { kind: "community_capture", communityId: attr.communityId, postId: attr.postId },
+  });
+  if (assigned) await notifyOwner(db, ownerId, id, "Una persona se registró desde la página de comunidad.");
   return { contactId: id, created };
 }

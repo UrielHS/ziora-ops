@@ -75,8 +75,12 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
   it("resolver cuenta el clic solo si count=true; código desconocido da null", async () => {
     const { db, community, pau } = await setup();
     const { communityPosts } = await import("@/db/schema");
-    const { createPost, resolvePostLink } = await import("./community-posts");
+    const { createPost, markPublished, resolvePostLink } = await import("./community-posts");
     const post = await createPost(db, { communityId: community.id, baseMessageKey: "M1", publisherId: pau }, actor);
+    // planeado: redirige pero no cuenta clic
+    expect(await resolvePostLink(db, post.code, { count: true })).not.toBeNull();
+    expect((await db.select().from(communityPosts).where(eq(communityPosts.id, post.id)))[0].clicks).toBe(0);
+    await markPublished(db, post.id, {}, actor);
     const r = await resolvePostLink(db, post.code, { count: true });
     await resolvePostLink(db, post.code, { count: false });
     const [row] = await db.select().from(communityPosts).where(eq(communityPosts.id, post.id));
@@ -144,9 +148,10 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
 
     await markPublished(db, alePost.id, {}, actor);
 
-    await expect(markPublished(db, pauPost.id, {}, actor)).rejects.toThrow(/Ya se publicó hace/);
+    // El post de Pau se omite solo al publicar Ale, y ya no se puede publicar.
     const [still] = await db.select().from(communityPosts).where(eq(communityPosts.id, pauPost.id));
-    expect(still.status).toBe("planeado");
+    expect(still).toMatchObject({ status: "omitido", skipReason: "otra publicadora publicó" });
+    await expect(markPublished(db, pauPost.id, {}, actor)).rejects.toThrow(/no se puede marcar/);
     expect((await loadPublisherView(db, pau)).queue.map((r) => r.community.id)).not.toContain(community.id);
 
     // También se revalida la política y la membresía al publicar.
@@ -168,6 +173,20 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     expect(await weeklyPostsUsed(q.db, q.pau)).toBe(WEEKLY_POSTS_PER_PUBLISHER);
     await expect(assertWeeklyQuota(q.db, q.pau)).rejects.toThrow(/últimos 7 días/);
     await expect(assertWeeklyQuota(q.db, q.ale)).resolves.toBeUndefined();
+  });
+
+  it("el cupo cuenta solo planeados elegibles y borrar por el admin exige post publicado", async () => {
+    const { db, community, pau, ale } = await setup();
+    const { communityPosts } = await import("@/db/schema");
+    const { createPost, markDeletedByAdmin } = await import("./community-posts");
+    const { weeklyPostsUsed } = await import("./community-queue");
+    const planned = await createPost(db, { communityId: community.id, baseMessageKey: "M1", publisherId: pau }, actor);
+    expect(await weeklyPostsUsed(db, pau)).toBe(1);
+    await expect(markDeletedByAdmin(db, planned.id, actor)).rejects.toThrow(/publicado/);
+    // Si otra publicadora publica sin pasar por markPublished (dato directo), el planeado de Pau ya no es elegible y no cuenta.
+    const alePost = await createPost(db, { communityId: community.id, baseMessageKey: "M2", publisherId: ale }, actor);
+    await db.update(communityPosts).set({ status: "publicado", publishedAt: new Date() }).where(eq(communityPosts.id, alePost.id));
+    expect(await weeklyPostsUsed(db, pau)).toBe(0);
   });
 
   it("la semilla es idempotente", async () => {

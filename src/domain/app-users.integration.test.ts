@@ -128,15 +128,19 @@ describeDb("usuarios de la app y seguimiento 1:1", async () => {
     const { communities } = await import("@/db/schema");
     const t = Date.now().toString(36);
     const [community] = await db.insert(communities).values({ name: `Grupo ${t}`, platform: "whatsapp", url: `https://wa.me/${t}-b`, slug: `au-slug-${t}` }).returning();
-    const a = `slug-${t}`, b = `directo-${t}`;
+    const a = `slug-${t}`, b = `directo-${t}`, c = `otro-${t}`;
     const mk = (uid: string, attribution: Record<string, string>) => ({ uid, email: `${uid}@example.com`, plan: "free", status: "free", patientCount: 0, sessionsLast30d: 0, attribution, trialKind: "community" });
     await applySnapshot(db, { generatedAt: now.toISOString(), users: [
       mk(a, { utm_medium: "comunidad", utm_content: community.slug }),
       mk(b, { utm_source: "directo", utm_medium: "comunidad", utm_campaign: "prueba-1-mes-202611" }),
+      // utm_content coincide con la slug de una comunidad, pero no viene de una liga de comunidad: no se liga.
+      mk(c, { utm_medium: "cpc", utm_content: community.slug }),
     ] }, now);
     const [ra] = await db.select().from(appUsers).where(eq(appUsers.uid, a));
     const [rb] = await db.select().from(appUsers).where(eq(appUsers.uid, b));
     expect(ra).toMatchObject({ communityId: community.id, communityPostId: null });
+    const [rc] = await db.select().from(appUsers).where(eq(appUsers.uid, c));
+    expect(rc.communityId).toBeNull();
     expect(rb).toMatchObject({ communityId: null, communityPostId: null, trialKind: "community" });
   });
 });

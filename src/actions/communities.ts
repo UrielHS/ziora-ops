@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
@@ -74,8 +75,21 @@ const _policy = formAction(z.object({ communityId: id, policy, rulesText: z.stri
 
 const _createPost = formAction(z.object({ communityId: id, baseMessageKey: messageKey }), async (d) => {
   const { a, userId } = await actor();
-  await assertWeeklyQuota(db, userId);
-  await createPost(db, { communityId: d.communityId, baseMessageKey: d.baseMessageKey, publisherId: userId }, a);
+  // Como «Copiar y abrir grupo»: si ya hay un planeado suyo en el grupo, se reutiliza (mismo mensaje) o se reemplaza (otro mensaje).
+  const existing = await db.select({ p: communityPosts, key: baseMessages.key }).from(communityPosts)
+    .leftJoin(baseMessages, eq(baseMessages.id, communityPosts.baseMessageId))
+    .where(and(eq(communityPosts.communityId, d.communityId), eq(communityPosts.publisherId, userId), eq(communityPosts.status, "planeado")));
+  if (existing.some((e) => e.key === d.baseMessageKey)) {
+    const [community] = await db.select().from(communities).where(eq(communities.id, d.communityId)).limit(1);
+    if (!community) throw new Error("Comunidad no encontrada");
+    const elig = await eligibilityFor(db, community, userId);
+    if (!elig.ok) throw new Error(elig.reason);
+    refresh();
+    return "Post generado";
+  }
+  await assertWeeklyQuota(db, userId, new Date(), d.communityId);
+  const post = await createPost(db, { communityId: d.communityId, baseMessageKey: d.baseMessageKey, publisherId: userId }, a);
+  for (const e of existing) if (e.p.id !== post.id) await skipPost(db, e.p.id, "Cambió de mensaje antes de publicar", a);
   refresh();
   return "Post generado";
 });
@@ -179,6 +193,7 @@ export async function prepareCopyAndOpenAction(communityId: string, key: string)
     refresh();
     return { ok: true, postId: post.id, text: post.finalText ?? "", url: community.url };
   } catch (err) {
+    unstable_rethrow(err); // deja pasar redirect() y notFound() (p. ej. requirePermission)
     return { ok: false, error: err instanceof Error ? err.message : "No se pudo preparar el post" };
   }
 }

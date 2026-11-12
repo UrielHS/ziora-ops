@@ -133,6 +133,31 @@ describe.runIf(enabled)("comunidades: interesados y atribución", () => {
     expect(nc.ownerId).toBe(uriel);
   });
 
+  it("sin reparto configurado: registerInterested lanza y la captura queda sin dueño ni fecha, asignable luego", async () => {
+    const { db, t, post, actor, community, uriel } = await setup();
+    const { contacts, contactActivities, settings } = await import("@/db/schema");
+    const { ingestCommunityCapture, registerInterested } = await import("./community-leads");
+    const [prev] = await db.select().from(settings).where(eq(settings.key, "community_lead_rr"));
+    await db.delete(settings).where(eq(settings.key, "community_lead_rr"));
+    try {
+      await expect(registerInterested(db, { postId: post.id, name: "Sin RR", email: `sinrr${t}@example.com`, kind: "psicologo" }, actor)).rejects.toThrow("Reparto de leads no configurado");
+      const r = await ingestCommunityCapture(db, { fullName: "Cap Sin RR", email: `capsinrr${t}@example.com`, utm: { utm_medium: "comunidad", utm_content: community.slug } });
+      const [c] = await db.select().from(contacts).where(eq(contacts.id, r.contactId));
+      expect(c.ownerId).toBeNull();
+      expect(c.leadRegisteredAt).toBeNull();
+      expect(await db.select().from(contactActivities).where(eq(contactActivities.contactId, r.contactId))).toHaveLength(1);
+    } finally {
+      await db.insert(settings).values(prev).onConflictDoNothing();
+    }
+    void uriel;
+  });
+
+  it("un teléfono inválido sin otro dato dice Teléfono no válido", async () => {
+    const { db, post, actor } = await setup();
+    const { registerInterested } = await import("./community-leads");
+    await expect(registerInterested(db, { postId: post.id, name: "Tel", phone: "123", kind: "psicologo" }, actor)).rejects.toThrow("Teléfono no válido");
+  });
+
   it("una demo real con UTM guarda los UTM en el contacto y sigue siendo demo_form", async () => {
     const { db, t } = await setup();
     const { contacts, demoRequests } = await import("@/db/schema");

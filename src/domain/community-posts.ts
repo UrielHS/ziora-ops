@@ -1,6 +1,6 @@
 /** Comunidades (Fase 1): posts con código y liga corta, elegibilidad de publicación y resolución de clics. */
 import { randomInt } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { appUsers, baseMessages, communities, communityCampaigns, communityMemberships, communityPosts, type CommunityPost } from "@/db/schema";
 import { users } from "@/db/shared";
@@ -156,6 +156,13 @@ export async function markPublished(db: Db, postId: string, opts: { postUrl?: st
   if (!elig.ok) throw new Error(elig.reason);
   await db.update(communityPosts).set({ status: "publicado", publishedAt: now, postUrl: opts.postUrl?.trim() || null, updatedAt: now }).where(eq(communityPosts.id, postId));
   await db.update(communities).set({ status: "activa", updatedAt: now }).where(and(eq(communities.id, p.communityId), eq(communities.status, "aprobada")));
+  // Con este post el grupo entra en el intervalo mínimo: los planeados de otras publicadoras ya no son elegibles.
+  await db.update(communityPosts).set({ status: "omitido", skipReason: "otra publicadora publicó", updatedAt: now })
+    .where(and(
+      eq(communityPosts.communityId, p.communityId), ne(communityPosts.id, postId),
+      p.publisherId ? or(isNull(communityPosts.publisherId), ne(communityPosts.publisherId, p.publisherId)) : undefined,
+      inArray(communityPosts.status, ["planeado", "espera_admin"]),
+    ));
 }
 
 export async function skipPost(db: Db, postId: string, reason: string, actor: Actor): Promise<void> {
@@ -169,6 +176,7 @@ export async function skipPost(db: Db, postId: string, reason: string, actor: Ac
 export async function markDeletedByAdmin(db: Db, postId: string, actor: Actor): Promise<void> {
   void actor;
   const p = await loadPost(db, postId);
+  if (p.status !== "publicado") throw new Error("Solo se puede marcar como borrado un post publicado");
   const now = new Date();
   await db.update(communityPosts).set({ status: "borrado_admin", updatedAt: now }).where(eq(communityPosts.id, postId));
   await db.update(communities).set({ status: "sin_promocion", updatedAt: now }).where(eq(communities.id, p.communityId));
@@ -177,9 +185,12 @@ export async function markDeletedByAdmin(db: Db, postId: string, actor: Actor): 
 /** Cuenta el clic solo si `count`; devuelve las 5 UTM del post o null si el código no existe. */
 export async function resolvePostLink(db: Db, code: string, opts: { count: boolean }): Promise<{ utm: Record<UtmKey, string> } | null> {
   const cols = { communityId: communityPosts.communityId, campaignId: communityPosts.campaignId };
-  const rows = opts.count
-    ? await db.update(communityPosts).set({ clicks: sql`${communityPosts.clicks} + 1` }).where(eq(communityPosts.code, code)).returning(cols)
-    : await db.select(cols).from(communityPosts).where(eq(communityPosts.code, code)).limit(1);
+  // Solo cuenta clic un post publicado de una campaña; un planeado u omitido sigue redirigiendo pero no suma.
+  if (opts.count) {
+    await db.update(communityPosts).set({ clicks: sql`${communityPosts.clicks} + 1` })
+      .where(and(eq(communityPosts.code, code), eq(communityPosts.status, "publicado"), isNotNull(communityPosts.campaignId)));
+  }
+  const rows = await db.select(cols).from(communityPosts).where(eq(communityPosts.code, code)).limit(1);
   const post = rows[0];
   if (!post?.campaignId) return null;
   const [community] = await db.select({ platform: communities.platform, slug: communities.slug }).from(communities).where(eq(communities.id, post.communityId)).limit(1);

@@ -2,7 +2,7 @@
 import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { baseMessages, communities, communityMemberships, communityPosts, type Community } from "@/db/schema";
-import { postEligibility } from "./community-posts";
+import { eligibilityFor, postEligibility } from "./community-posts";
 import type { MembershipStatus } from "./communities";
 
 /** Cupo semanal por publicadora (decisión de Chris, 11-nov-2026). Configurable. */
@@ -50,7 +50,10 @@ export function buildPublishQueue(
   return { rows, remaining };
 }
 
-/** Posts que cuentan contra el cupo: publicados en los últimos 7 días + generados (planeados) en los últimos 7 días. */
+/**
+ * Posts que cuentan contra el cupo: publicados en los últimos 7 días + planeados (generados en los últimos 7 días)
+ * que siguen siendo elegibles. Es la misma regla que usa la cola de la pantalla, así que «Llevas» y el tope coinciden.
+ */
 export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Date(), excludeCommunityId?: string): Promise<number> {
   const weekAgo = new Date(now.getTime() - 7 * DAY);
   const rows = await db.select({ communityId: communityPosts.communityId, status: communityPosts.status }).from(communityPosts)
@@ -61,7 +64,15 @@ export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Da
         and(eq(communityPosts.status, "planeado"), gte(communityPosts.createdAt, weekAgo)),
       ),
     ));
-  return rows.filter((r) => !(r.status === "planeado" && r.communityId === excludeCommunityId)).length;
+  let used = rows.filter((r) => r.status === "publicado").length;
+  const plannedIn = [...new Set(rows.filter((r) => r.status === "planeado" && r.communityId !== excludeCommunityId).map((r) => r.communityId))];
+  const counts = new Map<string, number>();
+  for (const r of rows) if (r.status === "planeado") counts.set(r.communityId, (counts.get(r.communityId) ?? 0) + 1);
+  for (const cid of plannedIn) {
+    const [community] = await db.select().from(communities).where(eq(communities.id, cid)).limit(1);
+    if (community && (await eligibilityFor(db, community, userId, now)).ok) used += counts.get(cid) ?? 0;
+  }
+  return used;
 }
 
 /** Cupo semanal del lado del servidor (la pantalla solo lo refleja). `replacingInCommunityId`: el planeado de ese grupo se va a reemplazar. */
