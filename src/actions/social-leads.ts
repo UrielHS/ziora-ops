@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
+import { closeDeal, recordOpinion, setInfluencerStage } from "@/domain/influencers";
 import type { Actor } from "@/domain/leads";
 import { recordDm } from "@/domain/social-dm";
 import { addContactChannel, setSocialLeadType } from "@/domain/social-leads";
@@ -50,6 +51,39 @@ const _setSocialLeadType = formAction(z.object({ id, type: z.enum(["psicologo", 
   return "Tipo actualizado";
 });
 
+/** Lo que opinó el influencer del producto. */
+const _recordOpinion = formAction(z.object({ id, opinion: z.string().trim().min(1, "Escribe la opinión").max(4000) }), async (d) => {
+  await recordOpinion(db, d.id, d.opinion, await actor());
+  refresh(d.id);
+  return "Opinión guardada";
+});
+
+const _setInfluencerStage = formAction(z.object({ id, stage: z.enum(["quiere_promover", "no_promueve"]) }), async (d) => {
+  await setInfluencerStage(db, d.id, d.stage, await actor());
+  refresh(d.id);
+  return "Etapa actualizada";
+});
+
+/** Cierra el acuerdo (quién lo cerró = la persona en sesión) y crea la liga de promoción. */
+const _closeDeal = formAction(
+  z.object({
+    id,
+    kind: z.enum(["comision", "pago_contenido", "otro"]),
+    terms: z.string().trim().min(1, "Escribe los términos (monto o porcentaje)").max(500),
+    notes: z.string().trim().max(2000).optional(),
+    closedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida"),
+    overrideNoUse: z.preprocess((v) => v === "on" || v === "true", z.boolean()),
+  }),
+  async (d) => {
+    await closeDeal(db, d.id, { kind: d.kind, terms: d.terms, notes: d.notes, closedOn: d.closedOn, overrideNoUse: d.overrideNoUse }, await actor());
+    refresh(d.id);
+    return "Acuerdo cerrado; ya tiene su liga de promoción";
+  },
+);
+
 export async function recordDmAction(prev: ActionState, fd: FormData) { return _recordDm(prev, fd); }
 export async function addContactChannelAction(prev: ActionState, fd: FormData) { return _addContactChannel(prev, fd); }
 export async function setSocialLeadTypeAction(prev: ActionState, fd: FormData) { return _setSocialLeadType(prev, fd); }
+export async function recordOpinionAction(prev: ActionState, fd: FormData) { return _recordOpinion(prev, fd); }
+export async function setInfluencerStageAction(prev: ActionState, fd: FormData) { return _setInfluencerStage(prev, fd); }
+export async function closeDealAction(prev: ActionState, fd: FormData) { return _closeDeal(prev, fd); }

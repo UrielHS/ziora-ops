@@ -10,8 +10,8 @@ import { CopyButton } from "@/components/ui/copy";
 import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
-import { accountContacts, accounts, communities, communityPosts, contactConsents, contacts, contactTags, sequences } from "@/db/schema";
-import { SocialPanel, type DmView } from "@/components/social-leads";
+import { accountContacts, accounts, appUsers, communities, communityPosts, contactConsents, contacts, contactTags, influencerDeals, sequences } from "@/db/schema";
+import { InfluencerPanel, SocialPanel, type DmView, type InfluencerAppUser } from "@/components/social-leads";
 import { shortLink } from "@/domain/community-posts";
 import { defaultMessage, loadTimeline } from "@/domain/leads";
 import { dmCounts, dmFor, dmLead, loadDmMessages } from "@/domain/social-dm";
@@ -75,6 +75,19 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
       inviteUrl, promoUrl: l?.promo ? shortLink(l.promo.code) : null, inviteClicks: invite?.clicks, promoClicks: l?.promo?.clicks,
     };
   }
+  // Influencer: acuerdo y uso propio de Ziora (si ya tiene cuenta ligada).
+  const isInfluencer = isSocial && c.socialLeadType === "influencer";
+  let influencer: { deal: typeof influencerDeals.$inferSelect | null; appUser: InfluencerAppUser } | null = null;
+  if (isInfluencer) {
+    const [[deal], [appUser]] = await Promise.all([
+      db.select().from(influencerDeals).where(eq(influencerDeals.contactId, id)).limit(1),
+      c.appUserUid
+        ? db.select({ plan: appUsers.plan, lastActiveAt: appUsers.lastActiveAt, sessionsTotal: appUsers.sessionsTotal, notesTotal: appUsers.notesTotal, removedAt: appUsers.removedAt })
+            .from(appUsers).where(eq(appUsers.uid, c.appUserUid)).limit(1)
+        : Promise.resolve([]),
+    ]);
+    influencer = { deal: deal ?? null, appUser: appUser ?? null };
+  }
   const city = c.cityName ?? (c.city ? CITY[c.city] : null);
   const profile = ([
     ["Puesto", c.jobTitle], ["Empresa o clínica", c.company], ["Pacientes por semana", c.patientsPerWeek], ["Enfoque", c.approach],
@@ -132,6 +145,13 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             <Card>
               <PanelHeader title="Redes" subtitle="Copia el mensaje, abre el perfil y escríbele por DM; luego marca «Le escribí»." />
               <SocialPanel c={c} dm={social.dm} inviteUrl={social.inviteUrl} promoUrl={social.promoUrl} inviteClicks={social.inviteClicks} promoClicks={social.promoClicks} canManage={canManage} />
+            </Card>
+          )}
+
+          {social && influencer && (
+            <Card>
+              <PanelHeader title="Influencer" subtitle="Cómo usa Ziora, qué opinó y el acuerdo para que lo promueva." />
+              <InfluencerPanel c={c} deal={influencer.deal} appUser={influencer.appUser} promoUrl={social.promoUrl} promoClicks={social.promoClicks} canManage={canManage} />
             </Card>
           )}
 

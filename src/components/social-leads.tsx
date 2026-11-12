@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { CalendarClock, ExternalLink } from "lucide-react";
 import { markRepliedAction, postponeAction, setLeadStatusAction } from "@/actions/leads";
-import { addContactChannelAction, recordDmAction, setSocialLeadTypeAction } from "@/actions/social-leads";
+import { addContactChannelAction, closeDealAction, recordDmAction, recordOpinionAction, setInfluencerStageAction, setSocialLeadTypeAction } from "@/actions/social-leads";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { CopyButton } from "@/components/ui/copy";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
-import type { contacts } from "@/db/schema";
-import { DM_DAILY_WARN, socialProfileUrl } from "@/domain/social-shared";
+import type { contacts, InfluencerDeal } from "@/db/schema";
+import { canMoveStage, DM_DAILY_WARN, socialProfileUrl, usesZiora } from "@/domain/social-shared";
 import { fmtDate, todayISO } from "@/lib/format";
-import { SOCIAL_LEAD_TYPE, SOCIAL_PLATFORM, SOCIAL_TIER } from "@/lib/labels";
+import { DEAL_KIND, INFLUENCER_STAGE, SOCIAL_LEAD_TYPE, SOCIAL_PLATFORM, SOCIAL_TIER } from "@/lib/labels";
 import { LeadPriorityBadge, LeadStatusBadge } from "./leads";
 
 type Lead = typeof contacts.$inferSelect;
@@ -197,6 +197,100 @@ export function DmCounter({ sent }: { sent: number }) {
     <div className={cn("rounded-2xl border px-4 py-2.5 text-sm", over ? "border-danger/40 bg-red-50 text-danger" : "border-line bg-white text-muted")}>
       <p className="font-semibold">Hoy llevas {sent} DMs</p>
       {over && <p className="mt-0.5 text-xs">Llevas más de {DM_DAILY_WARN} DMs hoy. Instagram y TikTok bloquean cuentas que mandan muchos mensajes seguidos: mejor sigue mañana.</p>}
+    </div>
+  );
+}
+
+export type InfluencerAppUser = { plan: string; lastActiveAt: Date | null; sessionsTotal: number; notesTotal: number; removedAt: Date | null } | null;
+
+/** Ficha → panel «Influencer»: uso propio de Ziora, opinión, etapas, acuerdo y liga de promoción. Solo para leads de tipo influencer. */
+export function InfluencerPanel({ c, deal, appUser, promoUrl, promoClicks, canManage }: {
+  c: Lead; deal: Pick<InfluencerDeal, "kind" | "terms" | "notes" | "noUseOverride" | "closedOn"> | null; appUser: InfluencerAppUser;
+  promoUrl: string | null; promoClicks?: number; canManage: boolean;
+}) {
+  const stage = c.influencerStage;
+  const uses = usesZiora(appUser);
+  const closed = stage === "acuerdo_cerrado";
+  return (
+    <div className="flex flex-col gap-4 px-5 pb-5">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="label">Etapa</span>
+        <Badge tone={closed ? "green" : "gray"}>{stage ? INFLUENCER_STAGE[stage] : "Sin etapa"}</Badge>
+      </div>
+
+      <div className="text-sm">
+        <p className="label">Uso propio de Ziora</p>
+        {appUser ? (
+          <p className="mt-1">
+            Plan {appUser.plan} · {appUser.sessionsTotal} {appUser.sessionsTotal === 1 ? "sesión" : "sesiones"} · {appUser.notesTotal} {appUser.notesTotal === 1 ? "nota" : "notas"}
+            {" · "}{appUser.lastActiveAt ? `activo el ${fmtDate(appUser.lastActiveAt)}` : "sin actividad registrada"}
+            {appUser.removedAt && <span className="text-danger"> · cuenta dada de baja</span>}
+          </p>
+        ) : (
+          <p className="mt-1 text-muted">Aún no se registra con su invitación</p>
+        )}
+      </div>
+
+      <div className="text-sm">
+        <p className="label">Opinión</p>
+        {c.influencerOpinion ? <p className="mt-1 whitespace-pre-wrap">{c.influencerOpinion}</p> : <p className="mt-1 text-muted">Aún sin opinión registrada</p>}
+        {canManage && !closed && (
+          <ActionForm action={recordOpinionAction} className="mt-2 flex flex-col gap-2">
+            <input type="hidden" name="id" value={c.id} />
+            <textarea name="opinion" required rows={3} defaultValue={c.influencerOpinion ?? ""} placeholder="Qué le pareció Ziora" className={inputCls} />
+            <div><Submit variant="secondary" className="!py-1.5 !text-xs">Guardar opinión</Submit></div>
+          </ActionForm>
+        )}
+      </div>
+
+      {canManage && !closed && (
+        <div className="flex flex-wrap items-center gap-2">
+          {(["quiere_promover", "no_promueve"] as const).filter((to) => canMoveStage(stage, to)).map((to) => (
+            <ActionForm key={to} action={setInfluencerStageAction} className="contents">
+              <input type="hidden" name="id" value={c.id} />
+              <input type="hidden" name="stage" value={to} />
+              <Submit variant={to === "quiere_promover" ? "secondary" : "ghost"} className="!py-1.5 !text-xs">{INFLUENCER_STAGE[to]}</Submit>
+            </ActionForm>
+          ))}
+        </div>
+      )}
+
+      {canManage && stage === "quiere_promover" && (
+        <ActionForm action={closeDealAction} className="flex flex-col gap-2 rounded-2xl border border-line bg-[#FBFAF6] p-3">
+          <input type="hidden" name="id" value={c.id} />
+          <p className="label">Cerrar acuerdo</p>
+          <div className="flex flex-wrap gap-2">
+            <Select name="kind" defaultValue="comision" className="w-auto py-1.5 text-xs" options={Object.entries(DEAL_KIND) as [string, string][]} />
+            <input name="terms" required placeholder="Monto o porcentaje (p. ej. 20 %)" className={cn(inputCls, "w-56 py-1.5")} />
+            <input name="closedOn" type="date" required defaultValue={todayISO()} className={cn(inputCls, "w-40 py-1.5")} />
+          </div>
+          <input name="notes" placeholder="Notas (opcional)" className={cn(inputCls, "py-1.5")} />
+          {!uses && (
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" name="overrideNoUse" /> Cerrar aunque todavía no usa Ziora
+            </label>
+          )}
+          <div><Submit variant="primary" className="!py-1.5 !text-xs">Cerrar acuerdo</Submit></div>
+        </ActionForm>
+      )}
+
+      {closed && deal && (
+        <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3 text-sm">
+          <p className="label">Acuerdo cerrado</p>
+          <p className="mt-1">{DEAL_KIND[deal.kind]} · {deal.terms} · {fmtDate(deal.closedOn, { day: "numeric", month: "short", year: "numeric" })}</p>
+          {deal.notes && <p className="mt-1 text-muted">{deal.notes}</p>}
+          {deal.noUseOverride && <p className="mt-1 text-xs text-muted">Se cerró sin uso de Ziora.</p>}
+        </div>
+      )}
+
+      {promoUrl && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="label">Liga de promoción</span>
+          <span className="break-all text-xs">{promoUrl}</span>
+          <CopyButton text={promoUrl} />
+          {promoClicks !== undefined && <span className="text-xs text-muted">{promoClicks} clics</span>}
+        </div>
+      )}
     </div>
   );
 }

@@ -6,9 +6,9 @@ vi.mock("@/actions/leads", () => ({
   setLeadStatusAction: vi.fn(), setNextActionAction: vi.fn(), referralLinkSentAction: vi.fn(), markTryingAction: vi.fn(), setChannelInvalidAction: vi.fn(),
 }));
 vi.mock("@/actions/sequences", () => ({ enrollAction: vi.fn(), stopEnrollmentAction: vi.fn() }));
-vi.mock("@/actions/social-leads", () => ({ recordDmAction: vi.fn(), addContactChannelAction: vi.fn(), setSocialLeadTypeAction: vi.fn() }));
+vi.mock("@/actions/social-leads", () => ({ recordDmAction: vi.fn(), addContactChannelAction: vi.fn(), setSocialLeadTypeAction: vi.fn(), recordOpinionAction: vi.fn(), setInfluencerStageAction: vi.fn(), closeDealAction: vi.fn() }));
 
-const { SocialPanel, SocialTodayRow, DmCounter } = await import("./social-leads");
+const { SocialPanel, SocialTodayRow, DmCounter, InfluencerPanel } = await import("./social-leads");
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
 const lead = {
@@ -85,5 +85,48 @@ describe("DmCounter", () => {
     expect(render(<DmCounter sent={30} />)).not.toContain("bloquean");
     expect(render(<DmCounter sent={31} />)).toContain("bloquean");
     expect(render(<DmCounter sent={5} />)).toContain("Hoy llevas 5 DMs");
+  });
+});
+
+describe("InfluencerPanel", () => {
+  const promo = "https://ziora-copilot.com/c/p7m2qxa";
+  const using = { plan: "pro", lastActiveAt: new Date("2026-11-10T12:00:00Z"), sessionsTotal: 3, notesTotal: 2, removedAt: null };
+  const inf = (o: object) => ({ ...lead, influencerStage: null, influencerOpinion: null, ...o }) as unknown as Parameters<typeof InfluencerPanel>[0]["c"];
+  const base = { deal: null, appUser: null, promoUrl: null, canManage: true };
+
+  it("sin cuenta ligada avisa que aún no se registra y pide la casilla para cerrar", () => {
+    const html = render(<InfluencerPanel {...base} c={inf({ influencerStage: "quiere_promover" })} />);
+    expect(html).toContain("Aún no se registra con su invitación");
+    expect(html).toContain("Cerrar aunque todavía no usa Ziora");
+    expect(html).toContain("Cerrar acuerdo");
+  });
+  it("con cuenta y sesiones muestra el uso y no ofrece la casilla", () => {
+    const html = render(<InfluencerPanel {...base} appUser={using} c={inf({ influencerStage: "quiere_promover" })} />);
+    expect(html).toContain("pro");
+    expect(html).toContain("3 sesiones");
+    expect(html).toContain("2 notas");
+    expect(html).not.toContain("Cerrar aunque todavía no usa Ziora");
+  });
+  it("los botones de etapa siguen las transiciones", () => {
+    const html = render(<InfluencerPanel {...base} c={inf({ influencerStage: "opinion_recibida" })} />);
+    expect(html).toContain("Quiere promover");
+    expect(html).toContain("No promueve");
+    expect(html).not.toContain("Cerrar acuerdo");
+  });
+  it("con acuerdo muestra el acuerdo y la liga de promoción con sus clics, sin formularios", () => {
+    const deal = { kind: "comision", terms: "20 %", notes: null, noUseOverride: true, closedOn: "2026-11-20" } as unknown as Parameters<typeof InfluencerPanel>[0]["deal"];
+    const html = render(<InfluencerPanel {...base} deal={deal} promoUrl={promo} promoClicks={4} c={inf({ influencerStage: "acuerdo_cerrado" })} />);
+    expect(html).toContain("Acuerdo cerrado");
+    expect(html).toContain("20 %");
+    expect(html).toContain(promo);
+    expect(html).toContain("4 clics");
+    expect(html).toContain("sin uso de Ziora");
+    expect(html).not.toContain("Cerrar acuerdo");
+    expect(html).not.toContain("No promueve");
+  });
+  it("sin permiso de gestión no hay formularios", () => {
+    const html = render(<InfluencerPanel {...base} canManage={false} c={inf({ influencerStage: "quiere_promover", influencerOpinion: "Le gustó" })} />);
+    expect(html).toContain("Le gustó");
+    for (const t of ["Cerrar acuerdo", "Guardar opinión", "No promueve"]) expect(html).not.toContain(t);
   });
 });
