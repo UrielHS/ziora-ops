@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimatedMrr, followupCandidates, isActive, isPaying, looksLikeTestAccount, payState, realMrr, Snapshot, summarizeByPlan } from "./app-users";
+import { estimatedMrr, followupCandidates, inNoCardTrial, isActive, isPaying, looksLikeTestAccount, payState, realMrr, Snapshot, summarizeByPlan } from "./app-users";
 
 const now = new Date("2026-11-03T12:00:00Z");
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86400000);
@@ -119,5 +119,13 @@ describe("estado de pago y cuentas de prueba", () => {
     expect(looksLikeTestAccount("maria+consultorio@gmail.com")).toBe(false);
     expect(looksLikeTestAccount("0250002@up.edu.mx")).toBe(false);
     expect(looksLikeTestAccount("sin-arroba")).toBe(false);
+  });
+});
+
+describe("prueba sin tarjeta", () => {
+  it("inNoCardTrial", () => {
+    expect(inNoCardTrial({ trialKind: "community", trialEndsAt: new Date(now.getTime() + 86_400_000) }, now)).toBe(true);
+    expect(inNoCardTrial({ trialKind: "community", trialEndsAt: new Date(now.getTime() - 1) }, now)).toBe(false);
+    expect(inNoCardTrial({ trialKind: null, trialEndsAt: new Date(now.getTime() + 86_400_000) }, now)).toBe(false);
   });
 });

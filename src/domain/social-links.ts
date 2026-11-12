@@ -1,9 +1,10 @@
 /** Leads de redes: ligas cortas personales (invitación y promoción) y resolución del clic. Solo viaja el código, nunca el usuario. */
 import { randomInt } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Db, Dbx } from "@/db";
-import { contacts, socialLinks, type SocialLink } from "@/db/schema";
+import { appUsers, contactTags, contacts, socialLinks, type SocialLink } from "@/db/schema";
 import { CODE_ALPHABET, type UtmKey } from "./community-posts";
+import { logActivity, SYSTEM_ACTOR } from "./leads";
 import type { SocialLeadType, SocialPlatform } from "./social-leads";
 
 export type { SocialLink };
@@ -94,4 +95,56 @@ export async function loadLinks(db: Dbx, contactIds: string[]): Promise<Map<stri
     out.set(r.contactId, e);
   }
   return out;
+}
+
+/**
+ * Liga cada registro nuevo de la app con la liga de redes por la que llegó (utm_term = código), sin mirar el medio:
+ * si la landing cayó en el respaldo (medio "comunidad") el código sigue siendo el de redes. Del más antiguo al más nuevo.
+ * Siempre guarda social_link_id. Solo el primer registro real con una liga de invitación se vuelve la cuenta del lead;
+ * las cuentas de prueba, los siguientes registros y las ligas de promoción solo quedan atribuidos.
+ * Una transacción por usuario: un choque (p. ej. el correo ya es de otro contacto) nunca tumba la sincronización.
+ */
+export async function linkSocialSignups(db: Db, _now = new Date()): Promise<{ linked: number; attributed: number }> {
+  const pending = await db
+    .select({ uid: appUsers.uid, email: appUsers.email, isTest: appUsers.isTest, code: sql<string>`${appUsers.attribution}->>'utm_term'` })
+    .from(appUsers)
+    .where(and(isNull(appUsers.socialLinkId), isNotNull(appUsers.attribution), sql`${appUsers.attribution}->>'utm_term' is not null`))
+    .orderBy(sql`${appUsers.signedUpAt} asc nulls last`, asc(appUsers.uid));
+  const codes = [...new Set(pending.map((p) => p.code).filter((c) => SOCIAL_CODE_RE.test(c)))];
+  if (!codes.length) return { linked: 0, attributed: 0 };
+  const links = new Map((await db.select().from(socialLinks).where(inArray(socialLinks.code, codes))).map((l) => [l.code, l]));
+
+  let linked = 0, attributed = 0;
+  for (const p of pending) {
+    const link = links.get(p.code);
+    if (!link) continue;
+    const didLink = await db.transaction(async (tx) => {
+      const set = await tx.update(appUsers).set({ socialLinkId: link.id }).where(and(eq(appUsers.uid, p.uid), isNull(appUsers.socialLinkId))).returning({ uid: appUsers.uid });
+      if (!set.length) return null; // otro proceso ya lo atribuyó
+      if (link.kind !== "invitacion" || p.isTest) return false;
+      // Esta cuenta ya es de algún contacto (p. ej. ligada a mano): no se reasigna.
+      const [mine] = await tx.select({ id: contacts.id }).from(contacts).where(eq(contacts.appUserUid, p.uid)).limit(1);
+      if (mine) return false;
+      const claimed = await tx.update(contacts).set({ appUserUid: p.uid })
+        .where(and(eq(contacts.id, link.contactId), isNull(contacts.appUserUid))).returning({ email: contacts.email });
+      if (!claimed.length) return false; // la liga ya la gastó un registro anterior
+      const email = p.email.trim().toLowerCase();
+      const meta: Record<string, unknown> = { kind: "app_signup", uid: p.uid, linkId: link.id };
+      if (!claimed[0].email && email) {
+        const [other] = await tx.select({ id: contacts.id }).from(contacts).where(eq(contacts.email, email)).limit(1);
+        if (!other) await tx.update(contacts).set({ email }).where(eq(contacts.id, link.contactId));
+        else {
+          await tx.update(contacts).set({ details: sql`${contacts.details} || ${JSON.stringify({ correo_en_otro_lead: other.id })}::jsonb` }).where(eq(contacts.id, link.contactId));
+          meta.correo_en_otro_lead = other.id;
+        }
+      }
+      await tx.insert(contactTags).values({ contactId: link.contactId, tag: "ziora_user" }).onConflictDoNothing();
+      await logActivity(tx, { contactId: link.contactId, type: "sistema", actor: SYSTEM_ACTOR, summary: "Se registró en Ziora con su invitación", meta });
+      return true;
+    });
+    if (didLink === null) continue;
+    attributed++;
+    if (didLink) linked++;
+  }
+  return { linked, attributed };
 }

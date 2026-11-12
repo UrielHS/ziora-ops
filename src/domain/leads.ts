@@ -2,13 +2,13 @@
  * Reglas del CRM de leads: el embudo, sus avances y el timeline de cada contacto.
  * Todo cambio de estado deja una actividad `cambio_estado`; nada se edita, solo se agrega.
  */
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Dbx } from "@/db";
 import { accountContacts, accounts, appUsers, campaigns, campaignSends, contactActivities, contacts, demoRequests, planPrices, sequenceEnrollments, type ActivityType, type LeadStatus } from "@/db/schema";
 import { users } from "@/db/shared";
 import { DEMO_STAGE, LEAD_STATUS, SEND_STATUS } from "@/lib/labels";
 import { fmtDateTime } from "@/lib/format";
-import { isPaying } from "./app-users";
+import { inNoCardTrial, isPaying } from "./app-users";
 import type { Cadence } from "./sequences";
 
 /** Orden del embudo. `perdido` no está: es terminal y solo se pone a mano (o por baja). */
@@ -193,15 +193,15 @@ export async function setPriority(db: Dbx, contactIds: string[], priority: 1 | 2
 }
 
 /**
- * Cruza los usuarios de la app (snapshot de ziora-api) con los leads por correo y avanza: trial → en_trial, pagando → pago.
+ * Cruza los usuarios de la app (snapshot de ziora-api) con los leads por correo o por uid y avanza: trial → en_trial, pagando → pago.
  * Solo avanza; cuenta únicamente los leads que cambiaron. Las cuentas de prueba y las borradas no cuentan.
  */
-export async function syncLeadStatusFromAppUsers(db: Dbx): Promise<{ trial: number; paid: number }> {
+export async function syncLeadStatusFromAppUsers(db: Dbx, now = new Date()): Promise<{ trial: number; paid: number }> {
   const prices = await db.select().from(planPrices);
   const rows = await db
-    .select({ contactId: contacts.id, uid: appUsers.uid, plan: appUsers.plan, status: appUsers.status, mrrCents: appUsers.mrrCents, currency: appUsers.currency })
+    .select({ contactId: contacts.id, uid: appUsers.uid, plan: appUsers.plan, status: appUsers.status, mrrCents: appUsers.mrrCents, currency: appUsers.currency, trialKind: appUsers.trialKind, trialEndsAt: appUsers.trialEndsAt })
     .from(appUsers)
-    .innerJoin(contacts, eq(contacts.email, sql`lower(trim(${appUsers.email}))`))
+    .innerJoin(contacts, or(eq(contacts.email, sql`lower(trim(${appUsers.email}))`), eq(contacts.appUserUid, appUsers.uid)))
     // Solo quien ya es lead: un contacto sin estado (equipo, ponentes, usuarios que llegaron solos) no se vuelve lead por usar la app.
     .where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false), isNotNull(contacts.leadStatus)));
   let trial = 0, paid = 0;
@@ -209,7 +209,7 @@ export async function syncLeadStatusFromAppUsers(db: Dbx): Promise<{ trial: numb
     const meta = { source: "app_users", uid: r.uid };
     if (isPaying(r, prices)) {
       if (await advanceLead(db, r.contactId, "pago", SYSTEM_ACTOR, meta)) paid++;
-    } else if (/trial/i.test(r.status)) {
+    } else if (/trial/i.test(r.status) || inNoCardTrial(r, now)) {
       if (await advanceLead(db, r.contactId, "en_trial", SYSTEM_ACTOR, meta)) trial++;
     }
   }
