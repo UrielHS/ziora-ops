@@ -152,6 +152,35 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     expect(await status()).toBe("pago");
   });
 
+  it("un lead ligado por uid (sin correo) pasa a en_trial con la prueba sin tarjeta y a pago cuando paga", async () => {
+    const { db } = await import("@/db");
+    const { appUsers, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { syncLeadStatusFromAppUsers } = await import("./leads");
+    const t = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const { id } = await upsertContact(db, { name: "Redes Lead", source: "instagram", tags: ["lead"], leadStatus: "contactado", social: { platform: "instagram", handle: `nt.${t}`.slice(0, 30), leadType: "psicologo" } });
+    await db.insert(appUsers).values({ uid: `nc${t}`, email: `nc${t}@example.com`, plan: "pro", status: "free", trialKind: "community", trialEndsAt: new Date(Date.now() + 5 * 86400000), syncedAt: new Date() });
+    await db.update(contacts).set({ appUserUid: `nc${t}` }).where(eq(contacts.id, id));
+    const status = async () => (await db.select({ s: contacts.leadStatus }).from(contacts).where(eq(contacts.id, id)))[0].s;
+    await syncLeadStatusFromAppUsers(db);
+    expect(await status()).toBe("en_trial");
+    await db.update(appUsers).set({ status: "active", mrrCents: 69900, currency: "mxn", trialKind: null }).where(eq(appUsers.uid, `nc${t}`));
+    await syncLeadStatusFromAppUsers(db);
+    expect(await status()).toBe("pago");
+  });
+
+  it("una prueba sin tarjeta vencida no avanza a en_trial", async () => {
+    const { db } = await import("@/db");
+    const { appUsers, contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { syncLeadStatusFromAppUsers } = await import("./leads");
+    const t = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const { id } = await upsertContact(db, { name: "Vencida", email: `venc${t}@example.com`, source: "manual", tags: ["lead"], leadStatus: "contactado" });
+    await db.insert(appUsers).values({ uid: `v${t}`, email: `venc${t}@example.com`, plan: "pro", status: "free", trialKind: "community", trialEndsAt: new Date(Date.now() - 86400000), syncedAt: new Date() });
+    await syncLeadStatusFromAppUsers(db);
+    expect((await db.select({ s: contacts.leadStatus }).from(contacts).where(eq(contacts.id, id)))[0].s).toBe("contactado");
+  });
+
   it("la baja de correo marca perdido:baja salvo a quien ya está en trial o pagando", async () => {
     const { db } = await import("@/db");
     const { contacts } = await import("@/db/schema");

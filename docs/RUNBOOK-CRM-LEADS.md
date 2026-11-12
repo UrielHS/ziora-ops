@@ -40,10 +40,10 @@ Asignar lo que falte desde **Ajustes → Equipo** (o insertando en `ops.member_r
 | Uriel | `operations`, `dev_qa` | ver y gestionar leads, importar |
 | Eurídice | `sales` | ver y gestionar leads, importar, convertir en cuenta |
 | Rafa | `clinical_director` | ver y gestionar leads |
-| Ale | `marketing` | campañas y contenido; **no lleva leads** (puede verlos) |
+| Ale | `marketing` | campañas y contenido; **dueña de los leads de redes** (Chris, 12-nov-2026); no lleva los demás leads |
 | Paulina | `operations` | operación; **no lleva leads** (puede verlos) |
 
-Pau y Ale no hacen ventas (Chris, 10-nov): no se les asignan leads aunque su rol técnicamente se lo permita.
+Pau y Ale no hacen ventas (Chris, 10-nov): no se les asignan leads aunque su rol técnicamente se lo permita. Excepción (Chris, 12-nov-2026): Ale es dueña de los leads de redes; Paulina y Ale siguen sin llevar los demás leads.
 
 Permisos exactos: `src/lib/permissions.ts`.
 
@@ -233,4 +233,72 @@ de cada lead las muestra en **Mis ligas** con botón Copiar; la de referido llev
 select u.name, p.referral_url, p.booking_url, p.discount_code from ops.seller_profiles p join public.users u on u.id = p.user_id;
 select count(*) filter (where email_invalid_at is not null) correo_mal, count(*) filter (where phone_invalid_at is not null) tel_mal from ops.contacts;
 select referred_by_code, count(*) from ops.app_users where referred_by_code is not null group by 1 order by 2 desc;
+```
+
+## 9. Leads de redes sociales (psicólogos e influencers de Instagram/TikTok)
+
+Qué es: listas de perfiles que Ale contacta por DM a mano. Ops no habla con Instagram ni TikTok: solo copia el texto y abre el perfil.
+Dueña de todos estos leads: **Ale** (Chris, 12-nov-2026).
+
+### 9.1 Importar las listas
+
+Los CSV viven en el repo de documentación, en `docs/gtm/redes/` (no se suben a terceros ni se pegan en el chat). Con el túnel de la
+sección 2 abierto y `DATABASE_URL` exportada:
+
+```bash
+npx tsx dev/import-leads-redes.ts --lista=influencers --owner=<correo-de-Ale> <ruta>/docs/gtm/redes/<influencers>.csv
+npx tsx dev/import-leads-redes.ts --lista=psicologos   --owner=<correo-de-Ale> <ruta>/docs/gtm/redes/<psicologos>.csv
+```
+
+- `--lista` es `influencers` o `psicologos`; `--owner` es el correo @ziora-copilot.com de la dueña. Es idempotente por (plataforma, usuario):
+  volver a correrlo no duplica; el mismo @ escrito distinto (`@Usuario`, URL, `www.`) es el mismo lead.
+- Imprime `{ created, existing, otherOwner, skipped }` (conteos; nunca usuarios ni correos). `otherOwner` = ya existía con otro dueño y no se tocó.
+- Mensajes de DM (una sola vez y tras cualquier cambio de texto): `npx tsx dev/seed-mensajes-redes.ts`. Siembra RP1–RP3 (psicólogos) y
+  RI1–RI3 (influencers), textos aprobados por Chris el 12-nov-2026. Re-correrla restaura el texto aprobado y pisa ediciones hechas en la app.
+
+### 9.2 Cómo trabaja Ale
+
+1. **Mi día** (`/leads/hoy`) lista lo que toca hoy, con el contador de DMs del día. Pasar de **30 DMs** da un aviso (no hay tope duro).
+2. Abre la ficha del lead → **Copiar mensaje y abrir perfil**: copia el DM con su nombre y su liga personal y abre el perfil. Ale lo ajusta a
+   la persona antes de mandarlo (no se mandan iguales en serie).
+3. Tras mandarlo, **Le escribí**: cuenta un DM y agenda el seguimiento (a **4, 7 y 14 días**). Un doble clic no cuenta dos veces.
+4. Si responde: **Respondió**, y para influencers se registra su opinión y se mueve la etapa (opinión recibida → quiere promover → acuerdo
+   cerrado, o no promueve). Cerrar acuerdo exige términos escritos y crea su liga de promoción.
+5. **Influencers** (`/leads/influencers`): una fila por influencer con etapa, si usa Ziora, acuerdo y lo que trae su liga (clics, registros,
+   en prueba, pagando). El aviso rojo «Tiene acuerdo y no usa Ziora» pide atención.
+
+### 9.3 Qué significa cada liga
+
+Todas son `https://ziora-copilot.com/c/<código>` (código de 7 caracteres; en la URL solo viaja el código, nunca el @ ni el nombre).
+
+| Liga | Quién la recibe | Prueba sin tarjeta | Campaña |
+|---|---|---|---|
+| Invitación personal | psicólogo | 30 días | `redes-psicologo-202611` |
+| Invitación personal | influencer | 60 días | `redes-influencer-202611` |
+| Promoción | influencer, **solo tras el acuerdo** | 30 días para quien se registre | `redes-promo-202611` |
+
+- La invitación es de una persona: el primer registro real (no de prueba) queda como la cuenta del lead; los siguientes solo cuentan como
+  «llegó por su invitación» (`+N por su invitación` en `/leads/influencers`).
+- La promoción es para compartir con su audiencia: cada registro cuenta en sus columnas Registros / En prueba / Pagando. Su propio registro
+  nunca cuenta como referido; tampoco cuentas de prueba ni bajas.
+- Una campaña de redes desconocida da los 14 días normales de la app; los 30 días de comunidades (`utm_medium=comunidad`) no cambian.
+- En **Usuarios de Ziora**: filtro «Origen: redes» e insignia «Redes»; la prueba se ve como «Prueba de redes · vence <fecha>».
+
+### 9.4 Verificación
+
+```sql
+-- leads de redes por tipo y dueño
+select c.social_lead_type, u.name owner, count(*) from ops.contacts c left join public.users u on u.id = c.owner_id
+ where c.social_handle is not null group by 1, 2 order by 1, 2;
+-- ligas y clics
+select kind, count(*) ligas, sum(clicks) clics from ops.social_links group by 1;
+-- registros por liga (sin pruebas ni bajas)
+select l.kind, count(*) registros, count(*) filter (where a.status = 'active') pagando
+  from ops.app_users a join ops.social_links l on l.id = a.social_link_id
+ where not a.is_test and a.removed_at is null group by 1;
+-- acuerdos cerrados sin cuenta que use Ziora
+select count(*) from ops.influencer_deals d join ops.contacts c on c.id = d.contact_id
+  left join ops.app_users a on a.uid = c.app_user_uid where a.uid is null or a.sessions_total < 1 or a.removed_at is not null;
+-- DMs mandados hoy
+select count(*) from ops.contact_activities where meta->>'kind' = 'social_dm' and occurred_at >= date_trunc('day', now());
 ```

@@ -66,7 +66,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   if (sp.estado === "activo") where.push(gte(appUsers.lastActiveAt, activeSince));
   if (sp.estado === "inactivo") where.push(or(lt(appUsers.lastActiveAt, activeSince), isNull(appUsers.lastActiveAt))!);
   if (sp.plan) where.push(eq(appUsers.plan, sp.plan));
-  if (sp.origen === "comunidad") where.push(or(isNotNull(appUsers.communityId), sql`${appUsers.attribution}->>'utm_medium' = 'comunidad'`, eq(appUsers.trialKind, "community"))!);
+  if (sp.origen === "comunidad") where.push(or(isNotNull(appUsers.communityId), sql`${appUsers.attribution}->>'utm_medium' = 'comunidad'`)!);
+  if (sp.origen === "redes") where.push(or(isNotNull(appUsers.socialLinkId), sql`${appUsers.attribution}->>'utm_medium' = 'redes'`)!);
   if (sp.q) where.push(or(ilike(appUsers.email, `%${sp.q}%`), ilike(appUsers.name, `%${sp.q}%`))!);
 
   const [users, team, prices, rows, [{ total }], trend, [lastSync], lastHealth, [{ hiddenTest }], communityRows] = await Promise.all([
@@ -187,6 +188,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           <Select name="estado" defaultValue={sp.estado} placeholder="Todos" className="w-36" options={[["activo", "Activos"], ["inactivo", "Inactivos"], ["baja", "Dados de baja"], ["prueba", "Cuentas de prueba"]]} />
           <button className={btn("ghost", "sm")}>Filtrar</button>
           <Link href={qs({ origen: sp.origen === "comunidad" ? undefined : "comunidad", p: undefined })} className={cn(btn(sp.origen === "comunidad" ? "secondary" : "ghost", "sm"))}>Origen: comunidad</Link>
+          <Link href={qs({ origen: sp.origen === "redes" ? undefined : "redes", p: undefined })} className={cn(btn(sp.origen === "redes" ? "secondary" : "ghost", "sm"))}>Origen: redes</Link>
           <span className="ml-auto text-xs text-faint">{total} usuarios</span>
         </form>
         <div className="mt-3 overflow-x-auto">
@@ -202,14 +204,16 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 const act = isActive(u.lastActiveAt, now);
                 const pay = payState(u, prices);
                 const real = realMrr(u);
+                const fromSocial = !!u.socialLinkId || u.attribution?.utm_medium === "redes";
                 return (
                   <tr key={u.uid} className="border-b border-[#EFEDE6] last:border-b-0">
                     <td className="px-5 py-2.5"><span className="block font-semibold">{u.name ?? "—"}</span><span className="block text-xs text-muted">{u.email}</span>
                       {(u.communityId || u.attribution?.utm_medium === "comunidad") && (
                         <Badge tone="green">{u.communityId ? `Comunidad: ${communityName.get(u.communityId) ?? "—"}` : "Página /comunidad"}</Badge>
                       )}
+                      {fromSocial && <Badge tone="lilac">Redes</Badge>}
                       {u.trialKind === "community" && (
-                        <Badge tone="amber">Prueba de comunidad{u.trialEndsAt ? ` · vence ${fmtDate(u.trialEndsAt, { day: "numeric", month: "short", year: "2-digit" })}` : ""}</Badge>
+                        <Badge tone="amber">{fromSocial ? "Prueba de redes" : "Prueba de comunidad"}{u.trialEndsAt ? ` · vence ${fmtDate(u.trialEndsAt, { day: "numeric", month: "short", year: "2-digit" })}` : ""}</Badge>
                       )}</td>
                     <td className="px-2">{prices.find((p) => p.plan === u.plan)?.label ?? u.plan}</td>
                     <td className="px-2">{u.removedAt ? <Badge tone="gray">Baja</Badge> : <Badge tone={statusTone(u.status, act)}>{statusLabel(u.status)}{u.cancelAtPeriodEnd && !/cancel/i.test(u.status) ? " · cancela al cierre" : ""}{!act && !/cancel/i.test(u.status) ? " · inactivo" : ""}</Badge>}</td>

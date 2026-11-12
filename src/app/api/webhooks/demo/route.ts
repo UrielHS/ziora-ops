@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { ingestCommunityCapture } from "@/domain/community-leads";
 import { applyWebhookDemo, isTeamEmail } from "@/domain/demos";
+import { ingestSocialCapture } from "@/domain/social-links";
 import { verifyHmac } from "@/lib/crypto";
 import { requireEnv } from "@/lib/env";
 
@@ -42,6 +43,12 @@ export async function POST(req: Request) {
   const p = parsed.data;
   // Pruebas del equipo (correo @ziora-copilot.com): se responden como "skipped" para que la app no reintente.
   if (isTeamEmail(p.email)) return NextResponse.json({ ok: true, result: "skipped", demoId: null, reason: "correo del equipo" });
+
+  // Captura suave de /comunidad con UTM de redes (la visita viene de un DM): completa el lead de la liga.
+  if (p.utm?.utm_medium === "redes" && !p.scheduledAt && !p.status) {
+    await ingestSocialCapture(db, { fullName: p.fullName, email: p.email, utm: p.utm, note: p.painPoint });
+    return NextResponse.json({ ok: true, result: "lead" });
+  }
 
   // Captura suave de /comunidad: es un lead con atribución, no una demo.
   if (p.utm?.utm_medium === "comunidad" && !p.scheduledAt && !p.status) {

@@ -4,7 +4,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
-  boolean, date, index, integer, jsonb, pgSchema, primaryKey, serial, text, timestamp, uniqueIndex, uuid,
+  type AnyPgColumn, boolean, date, index, integer, jsonb, pgSchema, primaryKey, serial, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import { events, users } from "./shared";
 
@@ -17,7 +17,7 @@ export const cityEnum = ops.enum("city", ["cdmx", "nyc", "gdl", "mty", "other", 
 export const contactSourceEnum = ops.enum("contact_source", [
   "manual", "demo_form", "ziora_app", "sheet_import", "csv_import", "event_ops",
   "facebook_group", "instagram", "linkedin", "referral",
-  "whatsapp_group", "telegram_group", "landing_comunidad",
+  "whatsapp_group", "telegram_group", "landing_comunidad", "tiktok",
 ]);
 export const contactTagEnum = ops.enum("contact_tag", [
   "psychologist", "lead", "clinic", "ziora_user",
@@ -31,6 +31,14 @@ export type ContactTag = (typeof contactTagEnum.enumValues)[number];
 /** Embudo de leads (CRM). Orden: nuevo < contactado < respondio < demo_agendada < en_trial < pago; perdido es terminal. */
 export const leadStatusEnum = ops.enum("lead_status", ["nuevo", "contactado", "respondio", "demo_agendada", "en_trial", "pago", "perdido"]);
 export type LeadStatus = (typeof leadStatusEnum.enumValues)[number];
+
+export const socialPlatformEnum = ops.enum("social_platform", ["instagram", "facebook", "tiktok", "linkedin"]);
+// Leads de redes sociales (Instagram/TikTok): ver domain/social-leads.ts
+export const socialLeadTypeEnum = ops.enum("social_lead_type", ["psicologo", "influencer"]);
+export const socialTierEnum = ops.enum("social_tier", ["micro", "nano", "por_confirmar_pais"]);
+export const influencerStageEnum = ops.enum("influencer_stage", ["opinion_recibida", "quiere_promover", "acuerdo_cerrado", "no_promueve"]);
+export const socialLinkKindEnum = ops.enum("social_link_kind", ["invitacion", "promocion"]);
+export const influencerDealKindEnum = ops.enum("influencer_deal_kind", ["comision", "pago_contenido", "otro"]);
 
 export const contacts = ops.table(
   "contacts",
@@ -75,11 +83,23 @@ export const contacts = ops.table(
     communityPostId: uuid("community_post_id").references(() => communityPosts.id, { onDelete: "set null" }),
     registeredById: uuid("registered_by_id").references(() => users.id, { onDelete: "set null" }), // quién registró al interesado
     leadRegisteredAt: timestamp("lead_registered_at", { withTimezone: true }),
+    // --- Leads de redes sociales: se identifican por (plataforma, usuario normalizado)
+    socialPlatform: socialPlatformEnum("social_platform"),
+    socialHandle: text("social_handle"), // minúsculas, sin @ (ver normalizeHandle)
+    socialProfileUrl: text("social_profile_url"),
+    socialFollowers: text("social_followers"),
+    socialTier: socialTierEnum("social_tier"),
+    socialLeadType: socialLeadTypeEnum("social_lead_type"),
+    influencerStage: influencerStageEnum("influencer_stage"),
+    influencerOpinion: text("influencer_opinion"),
+    appUserUid: text("app_user_uid").references((): AnyPgColumn => appUsers.uid, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
   (t) => [
     uniqueIndex("contacts_email_unique").on(t.email),
+    uniqueIndex("contacts_social_unique").on(t.socialPlatform, t.socialHandle).where(sql`${t.socialHandle} is not null`),
+    uniqueIndex("contacts_app_user_uid_unique").on(t.appUserUid).where(sql`${t.appUserUid} is not null`),
     uniqueIndex("contacts_event_ops_unique").on(t.eventOpsContactId),
     uniqueIndex("contacts_phone_e164_unique").on(t.phoneE164).where(sql`${t.phoneE164} is not null`),
     index("contacts_name_idx").on(t.name),
@@ -693,8 +713,9 @@ export const appUsers = ops.table(
     feedbackCount: integer("feedback_count").notNull().default(0),
     sessionsTotal: integer("sessions_total").notNull().default(0),
     notesTotal: integer("notes_total").notNull().default(0),
+    socialLinkId: uuid("social_link_id").references((): AnyPgColumn => socialLinks.id, { onDelete: "set null" }),
   },
-  (t) => [index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email), index("app_users_referred_by_code_idx").on(t.referredByCode)],
+  (t) => [index("app_users_social_link_idx").on(t.socialLinkId), index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email), index("app_users_referred_by_code_idx").on(t.referredByCode)],
 );
 
 // Foto diaria agregada por plan para ver tendencias (sin datos por persona).
@@ -757,7 +778,6 @@ export const followups = ops.table(
 // ---------- marketing: redes sociales y campañas pagadas ----------
 // Se llenan con /api/jobs/sync-social (API de Meta) o con importación CSV (TikTok, LinkedIn,
 // agregadores como Windsor.ai o Supermetrics). Montos en centavos de MXN para no perder precisión.
-export const socialPlatformEnum = ops.enum("social_platform", ["instagram", "facebook", "tiktok", "linkedin"]);
 
 export const socialAccounts = ops.table(
   "social_accounts",
@@ -959,5 +979,33 @@ export const communityPosts = ops.table(
   },
   (t) => [uniqueIndex("community_posts_code_unique").on(t.code), index("community_posts_community_published_idx").on(t.communityId, t.publishedAt)],
 );
+// ---------- leads de redes: ligas personales y acuerdos con influencers ----------
+export const socialLinks = ops.table(
+  "social_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(), // código corto de la liga /c/<código>
+    kind: socialLinkKindEnum("kind").notNull(),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    clicks: integer("clicks").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("social_links_code_unique").on(t.code), uniqueIndex("social_links_contact_kind_unique").on(t.contactId, t.kind)],
+);
+
+export const influencerDeals = ops.table("influencer_deals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  contactId: uuid("contact_id").notNull().unique().references(() => contacts.id, { onDelete: "cascade" }),
+  kind: influencerDealKindEnum("kind").notNull(),
+  terms: text("terms").notNull(),
+  notes: text("notes"),
+  noUseOverride: boolean("no_use_override").notNull().default(false),
+  closedBy: uuid("closed_by").references(() => users.id, { onDelete: "set null" }),
+  closedOn: date("closed_on").notNull(),
+  ...timestamps(),
+});
+export type SocialLink = typeof socialLinks.$inferSelect;
+export type InfluencerDeal = typeof influencerDeals.$inferSelect;
 export type Community = typeof communities.$inferSelect;
 export type CommunityPost = typeof communityPosts.$inferSelect;

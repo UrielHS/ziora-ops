@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { CODE_RE, resolvePostLink } from "@/domain/community-posts";
+import { resolveSocialLink } from "@/domain/social-links";
 import { isSecretAuthorized } from "@/lib/job-auth";
 
 /**
@@ -14,7 +15,8 @@ export async function POST(req: Request) {
   try { body = await req.json(); } catch { return NextResponse.json({ ok: false, error: "cuerpo no válido" }, { status: 400 }); }
   const { code, count } = (body ?? {}) as { code?: unknown; count?: unknown };
   if (typeof code !== "string" || !CODE_RE.test(code)) return NextResponse.json({ ok: false, error: "código no válido" }, { status: 400 });
-  const found = await resolvePostLink(db, code, { count: count === true });
+  const opts = { count: count === true };
+  const found = (await resolvePostLink(db, code, opts)) ?? (await resolveSocialLink(db, code, opts));
   if (!found) return NextResponse.json({ ok: false }, { status: 404 });
   return NextResponse.json({ ok: true, utm: found.utm });
 }

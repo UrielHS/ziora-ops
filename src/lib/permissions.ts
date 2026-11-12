@@ -24,7 +24,7 @@ export const PERMISSIONS = {
   "revenue.view": ["ceo", "sales", "operations"],
   "analytics.view": ["marketing", "ceo", "operations", "sales"],
   "integrations.manage": ["dev_qa", "operations", "ceo"],
-  // Leads (CRM): todos los ven. Paulina y Ale NO llevan leads (Chris, 10-nov-2026; docs/RUNBOOK-CRM-LEADS.md): marketing y operaciones conservan leads.manage solo para crear el lead al registrar a un interesado; nunca quedan como dueñas.
+  // Leads (CRM): todos los ven. Ale es dueña de los leads de redes (Chris, 12-nov-2026); Paulina y Ale siguen sin llevar los demás leads (Chris, 10-nov-2026; docs/RUNBOOK-CRM-LEADS.md): marketing y operaciones conservan leads.manage solo para crear el lead al registrar a un interesado; nunca quedan como dueñas.
   "leads.view": ALL_ROLES,
   "leads.manage": ["sales", "ceo", "operations", "clinical_director", "marketing"],
   "contacts.import": ["sales", "ceo", "operations", "marketing"],

@@ -1,5 +1,5 @@
 /** Corre con RUN_DB_TESTS=1 y DATABASE_URL apuntando a una base migrada. */
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const enabled = !!process.env.DATABASE_URL && process.env.RUN_DB_TESTS === "1";
@@ -196,7 +196,8 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     await seedComunidades(db);
     const second = await seedComunidades(db);
     expect(second).toMatchObject({ campaignCreated: false, messagesCreated: 0, messagesUpdated: BASE_MESSAGES.length });
-    expect(await db.select().from(baseMessages)).toHaveLength(BASE_MESSAGES.length);
+    const keys = BASE_MESSAGES.map((m) => m.key);
+    expect(await db.select().from(baseMessages).where(inArray(baseMessages.key, keys))).toHaveLength(BASE_MESSAGES.length);
     expect(await db.select().from(communityCampaigns).where(eq(communityCampaigns.slug, "prueba-1-mes-202611"))).toHaveLength(1);
   });
 });

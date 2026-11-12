@@ -44,6 +44,8 @@ export function LeadCard({ c, owner, selectable = true }: { c: Lead; owner?: str
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
         {c.jobTitle && <span className="truncate font-semibold text-ink">{c.jobTitle}</span>}
         {city && <span className="flex items-center gap-0.5"><MapPin className="h-3 w-3" />{city}</span>}
+        {c.socialHandle && <span className="truncate">@{c.socialHandle}</span>}
+        {c.socialHandle && c.socialFollowers && <span>· {c.socialFollowers}</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <LeadPriorityBadge priority={c.priority} />

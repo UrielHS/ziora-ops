@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { Db } from "@/db";
 import { appUserDaily, appUsers, planPrices } from "@/db/schema";
 import { resolveAttribution } from "./community-leads";
+import { linkSocialSignups } from "./social-links";
 import { monthlyValue, type BillingPeriod } from "./sales";
 
 export const SnapshotUser = z.strictObject({
@@ -51,11 +52,16 @@ export type Snapshot = z.infer<typeof Snapshot>;
 export const ACTIVE_DAYS = 14;
 const DAY = 86_400_000;
 
+/** Prueba sin tarjeta vigente: llega con status "free", trialKind (community) y fin de prueba en el futuro. */
+export function inNoCardTrial(u: { trialKind: string | null; trialEndsAt: Date | null }, now: Date) {
+  return !!u.trialKind && !!u.trialEndsAt && u.trialEndsAt.getTime() > now.getTime();
+}
+
 export function isActive(lastActiveAt: Date | null, now: Date, days = ACTIVE_DAYS) {
   return !!lastActiveAt && now.getTime() - lastActiveAt.getTime() <= days * DAY;
 }
 
-type Price = { plan: string; priceMxn: number; billingPeriod: BillingPeriod; paying: boolean };
+export type Price = { plan: string; priceMxn: number; billingPeriod: BillingPeriod; paying: boolean };
 type Billing = { mrrCents?: number | null; currency?: string | null };
 type UserLike = { plan: string; status: string; lastActiveAt: Date | null; patientCount: number; removedAt?: Date | null } & Billing;
 
@@ -226,6 +232,7 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
   });
 
   await linkCommunities(db);
+  await linkSocialSignups(db, now);
 
   const prices = await db.select().from(planPrices);
   const current = await db.select().from(appUsers).where(and(isNull(appUsers.removedAt), eq(appUsers.isTest, false)));

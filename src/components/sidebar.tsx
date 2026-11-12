@@ -30,6 +30,7 @@ function useNav(counts: Record<string, number>, access: Access) {
     { label: "Ventas", items: [
       { href: "/sales", label: "Cuentas y contratos", icon: Building2, perm: "sales.view" },
       { href: "/leads", label: "Leads", icon: Funnel, count: counts.leads, perm: "leads.view" },
+      { href: "/leads/influencers", label: "Influencers", icon: Megaphone, perm: "leads.view" },
       { href: "/demos", label: "Demos", icon: Video, count: counts.demos, perm: "leads.view" },
       { href: "/contacts", label: "Contactos", icon: Users, perm: "leads.view" },
     ] },

@@ -18,6 +18,8 @@ const id = z.uuid();
 const membership = z.enum(["por_solicitar", "solicitud_enviada", "unida", "rechazada", "nos_sacaron", "salio"]);
 const policy = z.enum(["desconocido", "si", "no", "permiso_admin", "dias_especificos"]);
 const messageKey = z.string().regex(/^M\d$/, "mensaje no válido");
+/** Estado y edición cubren también los DM de redes (RP1–RP3, RI1–RI3); crear posts sigue siendo solo M#. */
+const anyMessageKey = z.string().regex(/^(M\d|R[PI]\d)$/, "mensaje no válido");
 
 async function actor(): Promise<{ a: Actor; userId: string }> {
   const { user } = await requirePermission("communities.operate");
@@ -139,13 +141,23 @@ const _interested = formAction(z.object({
 });
 
 /** Solo dirección aprueba o retira los mensajes base. */
-const _baseStatus = formAction(z.object({ key: messageKey, status: z.enum(["borrador", "aprobado", "retirado"]) }), async (d) => {
+const _baseStatus = formAction(z.object({ key: anyMessageKey, status: z.enum(["borrador", "aprobado", "retirado"]) }), async (d) => {
   const { user } = await requirePermission("communities.approve_messages");
   const patch = d.status === "aprobado" ? { status: d.status, approvedBy: user.id, approvedAt: new Date() } : { status: d.status };
   const res = await db.update(baseMessages).set(patch).where(eq(baseMessages.key, d.key)).returning({ id: baseMessages.id });
   if (!res.length) throw new Error("Mensaje no encontrado");
   refresh();
   return "Mensaje actualizado";
+});
+
+/** Editar el texto de un DM de redes: quien opera puede, pero el mensaje vuelve a borrador y dirección debe aprobarlo de nuevo. */
+const _baseBody = formAction(z.object({ key: z.string().regex(/^R[PI]\d$/, "mensaje no válido"), body: z.string().trim().min(1, "falta el texto").max(4000) }), async (d) => {
+  await requirePermission("communities.operate");
+  const [cur] = await db.select({ id: baseMessages.id, version: baseMessages.version }).from(baseMessages).where(eq(baseMessages.key, d.key)).limit(1);
+  if (!cur) throw new Error("Mensaje no encontrado");
+  await db.update(baseMessages).set({ body: d.body, version: cur.version + 1, status: "borrador", approvedBy: null, approvedAt: null }).where(eq(baseMessages.id, cur.id));
+  refresh();
+  return "Texto guardado; dirección debe aprobarlo de nuevo";
 });
 
 export async function createCommunityAction(prev: ActionState, fd: FormData) { return _create(prev, fd); }
@@ -159,6 +171,7 @@ export async function skipPostAction(prev: ActionState, fd: FormData) { return _
 export async function markDeletedByAdminAction(prev: ActionState, fd: FormData) { return _deleted(prev, fd); }
 export async function registerInterestedAction(prev: ActionState, fd: FormData) { return _interested(prev, fd); }
 export async function setBaseMessageStatusAction(prev: ActionState, fd: FormData) { return _baseStatus(prev, fd); }
+export async function updateBaseMessageBodyAction(prev: ActionState, fd: FormData) { return _baseBody(prev, fd); }
 
 export type PrepareResult = { ok: true; postId: string; text: string; url: string } | { ok: false; error: string };
 

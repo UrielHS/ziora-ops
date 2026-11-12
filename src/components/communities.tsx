@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Check, Copy, ExternalLink, Send } from "lucide-react";
 import {
   createCommunityAction, createPostAction, markDeletedByAdminAction, markPublishedAction, prepareCopyAndOpenAction, registerInterestedAction,
-  reviewCommunityAction, setBaseMessageStatusAction, setMembershipAction, setPromoPolicyAction, skipPostAction, updatePostTextAction,
+  reviewCommunityAction, setBaseMessageStatusAction, setMembershipAction, setPromoPolicyAction, skipPostAction, updateBaseMessageBodyAction, updatePostTextAction,
 } from "@/actions/communities";
 import { Badge, btn, cn, Field, inputCls, Select } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
@@ -374,6 +374,14 @@ export function BaseMessageRow({ m, canApprove }: { m: { key: string; angle: str
         <span className="ml-auto"><CopyButton text={m.body} /></span>
       </div>
       <p className="whitespace-pre-wrap text-sm text-muted">{m.body}</p>
+      {/^R[PI]\d$/.test(m.key) && (
+        <ActionForm action={updateBaseMessageBodyAction} className="flex flex-col gap-2">
+          <input type="hidden" name="key" value={m.key} />
+          <textarea name="body" rows={6} required defaultValue={m.body} className={inputCls} aria-label={`Texto de ${m.key}`} />
+          <p className="text-xs text-muted">Variables: {"{nombre} {yo} {liga} {red}"}. Al guardar, el mensaje vuelve a borrador y dirección lo aprueba de nuevo.</p>
+          <div><Submit className="!py-1.5 !text-xs">Guardar texto</Submit></div>
+        </ActionForm>
+      )}
       {canApprove && (
         <ActionForm action={setBaseMessageStatusAction} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="key" value={m.key} />

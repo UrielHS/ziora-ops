@@ -103,7 +103,7 @@ export const CONTACT_TAG: Record<string, string> = {
 
 export const CONTACT_SOURCE: Record<string, string> = {
   manual: "Manual", luma: "Luma", notion: "Notion", linkedin: "LinkedIn", ai_tinkerers: "AI Tinkerers",
-  demo_form: "Formulario demo", ziora_app: "App Ziora", facebook_group: "Grupo FB", instagram: "Instagram", csv_import: "CSV",
+  demo_form: "Formulario demo", ziora_app: "App Ziora", facebook_group: "Grupo FB", instagram: "Instagram", tiktok: "TikTok", csv_import: "CSV",
   sheet_import: "Hoja de leads", event_ops: "Event Ops", referral: "Referido",
   whatsapp_group: "Grupo WhatsApp", telegram_group: "Grupo Telegram", landing_comunidad: "Landing comunidad",
 };
@@ -222,6 +222,11 @@ export const FOLLOWUP_REASON: Record<string, string> = {
 };
 
 export const SOCIAL_PLATFORM = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", linkedin: "LinkedIn" } as const;
+
+export const SOCIAL_LEAD_TYPE = { psicologo: "Psicólogo/a", influencer: "Influencer" } as const;
+export const SOCIAL_TIER = { micro: "Micro", nano: "Nano", por_confirmar_pais: "Por confirmar país" } as const;
+export const INFLUENCER_STAGE = { opinion_recibida: "Opinión recibida", quiere_promover: "Quiere promover", acuerdo_cerrado: "Acuerdo cerrado", no_promueve: "No promueve" } as const;
+export const DEAL_KIND = { comision: "Comisión", pago_contenido: "Pago por contenido", otro: "Otro" } as const;
 
 export const LEAD_STATUS = {
   nuevo: { label: "Nuevo", tone: "gray" },
