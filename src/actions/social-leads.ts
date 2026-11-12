@@ -32,13 +32,15 @@ const _recordDm = formAction(z.object({ id }), async (d) => {
 
 /** Agrega correo y/o teléfono a un lead que solo tenía su @. */
 const _addContactChannel = formAction(
-  z.object({ id, email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional() }),
+  z.object({ id, email: z.email("correo válido").max(200).optional(), phone: z.string().trim().max(40).optional() }),
   async (d) => {
     if (!d.email && !d.phone) throw new Error("Escribe un correo o un teléfono");
     const r = await addContactChannel(db, d.id, { email: d.email, phone: d.phone }, await actor());
     if (!r.ok) throw new Error("Ese correo o teléfono ya es de otro contacto.");
     refresh(d.id);
-    return "Dato agregado";
+    if (r.added) return r.unreadablePhone ? "Correo agregado; no se pudo leer el teléfono" : "Dato agregado";
+    if (r.unreadablePhone) throw new Error("No se pudo leer el teléfono");
+    return "Ya lo tenía";
   },
 );
 

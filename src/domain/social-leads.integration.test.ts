@@ -71,7 +71,9 @@ describe.runIf(enabled)("leads de redes: identidad por plataforma y usuario", ()
     const lead = await upsertContact(db, { name: "L", source: "instagram", tags: [], social: { platform: "instagram", handle: h } });
     const otroEmail = `otro${t}@example.com`;
     const otro = await upsertContact(db, { name: "O", email: otroEmail, source: "manual", tags: [] });
-    expect(await addContactChannel(db, lead.id, { email: `Nuevo${t}@example.com` }, actor)).toEqual({ ok: true });
+    expect(await addContactChannel(db, lead.id, { email: `Nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: true, unreadablePhone: false });
+    expect(await addContactChannel(db, lead.id, { email: `nuevo${t}@example.com` }, actor)).toEqual({ ok: true, added: false, unreadablePhone: false });
+    expect(await addContactChannel(db, lead.id, { phone: "abc" }, actor)).toEqual({ ok: true, added: false, unreadablePhone: true });
     expect(await addContactChannel(db, lead.id, { email: otroEmail }, actor)).toEqual({ ok: false, takenBy: otro.id });
     const [c] = await db.select().from(contacts).where(eq(contacts.id, lead.id));
     expect(c.email).toBe(`nuevo${t}@example.com`);

@@ -42,7 +42,7 @@ export function socialProfileUrl(platform: SocialPlatform, handle: string): stri
  */
 export async function addContactChannel(
   db: Dbx, contactId: string, ch: { email?: string; phone?: string }, actor: Actor,
-): Promise<{ ok: true } | { ok: false; takenBy: string }> {
+): Promise<{ ok: true; added: boolean; unreadablePhone: boolean } | { ok: false; takenBy: string }> {
   const email = ch.email?.trim() ? ch.email.trim().toLowerCase() : null;
   const phoneE164 = normalizePhoneE164(ch.phone);
   const set: Partial<typeof contacts.$inferInsert> = {};
@@ -57,10 +57,11 @@ export async function addContactChannel(
     if (o && o.id !== contactId) return { ok: false, takenBy: o.id };
     if (!o) { set.phone = ch.phone!.trim(); set.phoneE164 = phoneE164; set.phoneInvalidAt = null; added.push("teléfono"); }
   }
-  if (!added.length) return { ok: true };
+  const unreadablePhone = !!ch.phone?.trim() && !phoneE164;
+  if (!added.length) return { ok: true, added: false, unreadablePhone };
   await db.update(contacts).set(set).where(eq(contacts.id, contactId));
   await logActivity(db, { contactId, type: "sistema", actor, summary: `Se agregó ${added.join(" y ")} al lead`, meta: { kind: "channel_added", channels: added } });
-  return { ok: true };
+  return { ok: true, added: true, unreadablePhone };
 }
 
 export async function setSocialLeadType(db: Dbx, contactId: string, type: SocialLeadType, actor: Actor): Promise<void> {
