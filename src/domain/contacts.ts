@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { contactConsents, contacts, contactTagEnum, contactTags, type CityValue, type ContactSource, type ContactTag, type LeadStatus } from "@/db/schema";
 import { normalizePhoneE164 } from "./phone";
+import { normalizeHandle, socialProfileUrl, type SocialLeadType, type SocialPlatform, type SocialTier } from "./social-leads";
 import { logActivity, setLeadStatus, SYSTEM_ACTOR, type Actor } from "./leads";
 import { eoContacts, eoContactTags, organizations } from "@/db/shared";
 
@@ -23,7 +24,7 @@ export type ConsentInput = { channel: "email" | "whatsapp"; source: string; evid
 
 type UpsertInput = {
   name: string;
-  /** Correo o teléfono: hace falta al menos uno para poder buscar el contacto. */
+  /** Correo, teléfono o usuario de redes (`social`): hace falta al menos uno para poder buscar el contacto. */
   email?: string | null;
   phone?: string | null;
   /** Solo dígitos (525512345678). Si no viene, se calcula del teléfono. */
@@ -57,6 +58,8 @@ type UpsertInput = {
   communityPostId?: string | null;
   registeredById?: string | null;
   leadRegisteredAt?: Date | null;
+  /** Lead de redes: se identifica por (plataforma, usuario normalizado). Solo llena lo vacío, como el resto. */
+  social?: { platform: SocialPlatform; handle: string; profileUrl?: string | null; followers?: string | null; tier?: SocialTier | null; leadType?: SocialLeadType | null };
 };
 
 const TAGS = new Set<string>(contactTagEnum.enumValues);
@@ -89,28 +92,55 @@ export async function editContact(db: Db, id: string, d: ContactEdit, tags: Cont
 export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: string; created: boolean }> {
   const email = input.email ? normalizeEmail(input.email) : null;
   const phoneE164 = input.phoneE164 ?? normalizePhoneE164(input.phone);
-  if (!email && !phoneE164) throw new Error("Un contacto necesita correo o teléfono válido.");
+  const socialHandle = input.social ? normalizeHandle(input.social.handle) : null;
+  const social = input.social && socialHandle ? { ...input.social, handle: socialHandle } : null;
+  if (!email && !phoneE164 && !social) throw new Error("Un contacto necesita correo, teléfono o usuario de redes.");
   const fill = <T>(cur: T | null, next: T | null | undefined) => cur ?? next ?? null;
   const consents: ConsentInput[] = [
     ...(input.consents ?? []),
     ...(input.marketingOptIn ? [{ channel: "email" as const, ...input.marketingOptIn }] : []),
   ];
   return db.transaction(async (tx) => {
-    let [existing] = email
+    let existing: typeof contacts.$inferSelect | undefined;
+    [existing] = email
       ? await tx.select().from(contacts).where(eq(contacts.email, email)).limit(1)
-      : await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164!)).limit(1);
+      : phoneE164
+        ? await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164)).limit(1)
+        : [];
     // Un lead que entró solo con teléfono y después trae correo es la misma persona: se completa en vez de duplicarlo.
     // Si el dueño del teléfono ya tiene OTRO correo, son dos personas (p. ej. el conmutador de una clínica) y sigue abajo.
     if (!existing && email && phoneE164) {
       const [byPhone] = await tx.select().from(contacts).where(eq(contacts.phoneE164, phoneE164)).limit(1);
       if (byPhone && (!byPhone.email || byPhone.email === email)) existing = byPhone;
     }
+    // Último recurso: el mismo usuario en la misma plataforma es el mismo lead.
+    const findBySocial = async () => {
+      if (!social) return undefined;
+      const [r] = await tx.select().from(contacts)
+        .where(and(eq(contacts.socialPlatform, social.platform), eq(contacts.socialHandle, social.handle))).limit(1);
+      return r;
+    };
+    if (!existing) existing = await findBySocial();
     // El teléfono normalizado es único: si ya lo tiene otro contacto, se deja una nota en vez de romper.
     let nextPhoneE164 = existing?.phoneE164 ?? phoneE164 ?? null;
     const extra: Record<string, unknown> = {};
     if (nextPhoneE164 && !existing?.phoneE164) {
       const [owner] = await tx.select({ id: contacts.id }).from(contacts).where(eq(contacts.phoneE164, nextPhoneE164)).limit(1);
       if (owner && owner.id !== existing?.id) { nextPhoneE164 = null; extra.telefono_duplicado_de = owner.id; }
+    }
+    // El (plataforma, usuario) es único: si ya es de otro contacto no se pisa, se deja nota.
+    let socialCols: Partial<typeof contacts.$inferInsert> = {};
+    if (social) {
+      const owner = existing?.socialHandle ? undefined : await findBySocial();
+      if (owner && owner.id !== existing?.id) extra.usuario_duplicado_de = owner.id;
+      else {
+        socialCols = {
+          socialPlatform: existing?.socialPlatform ?? social.platform, socialHandle: existing?.socialHandle ?? social.handle,
+          socialProfileUrl: fill(existing?.socialProfileUrl ?? null, social.profileUrl ?? socialProfileUrl(social.platform, social.handle)),
+          socialFollowers: fill(existing?.socialFollowers ?? null, social.followers),
+          socialTier: fill(existing?.socialTier ?? null, social.tier), socialLeadType: fill(existing?.socialLeadType ?? null, social.leadType),
+        };
+      }
     }
     let id: string;
     if (existing) {
@@ -128,6 +158,7 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
         statusChangedAt: existing.leadStatus || !input.leadStatus ? existing.statusChangedAt : new Date(),
         priority: fill(existing.priority, input.priority), segment: fill(existing.segment, input.segment),
         ownerId: fill(existing.ownerId, input.ownerId),
+        ...socialCols,
         utm: Object.keys(existing.utm ?? {}).length ? existing.utm : (input.utm ?? {}),
         communityId: fill(existing.communityId, input.communityId), communityPostId: fill(existing.communityPostId, input.communityPostId),
         registeredById: fill(existing.registeredById, input.registeredById), leadRegisteredAt: fill(existing.leadRegisteredAt, input.leadRegisteredAt),
@@ -136,7 +167,7 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
       }).where(eq(contacts.id, id));
     } else {
       const [row] = await tx.insert(contacts).values({
-        name: input.name.trim() || email || phoneE164!, email, phone: input.phone ?? null, phoneE164: nextPhoneE164, company: input.company ?? null,
+        name: input.name.trim() || email || phoneE164 || (social ? `@${social.handle}` : ""), email, phone: input.phone ?? null, phoneE164: nextPhoneE164, company: input.company ?? null,
         jobTitle: input.jobTitle ?? null, city: input.city ?? null, cityName: input.cityName ?? null,
         patientsPerWeek: input.patientsPerWeek ?? null, approach: input.approach ?? null,
         documentation: input.documentation ?? null, aiUsage: input.aiUsage ?? null, linkedinUrl: input.linkedinUrl ?? null,
@@ -146,6 +177,7 @@ export async function upsertContact(db: Db, input: UpsertInput): Promise<{ id: s
         priority: input.priority ?? null, segment: input.segment ?? null, ownerId: input.ownerId ?? null,
         utm: input.utm ?? {}, communityId: input.communityId ?? null, communityPostId: input.communityPostId ?? null,
         registeredById: input.registeredById ?? null, leadRegisteredAt: input.leadRegisteredAt ?? null,
+        ...socialCols,
       }).returning({ id: contacts.id });
       id = row.id;
     }
