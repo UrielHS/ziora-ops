@@ -126,24 +126,32 @@ export async function registerInterested(
     summary: `Interesado registrado desde ${community.name}`,
     meta: { kind: "community_interested", communityId: community.id, postId: post.id },
   });
-  if (finalOwner) {
-    try {
-      const [o] = await db.select({ email: users.email }).from(users).where(eq(users.id, finalOwner)).limit(1);
-      if (o) await notifyTeam([o.email], "Nuevo interesado de comunidad", [`${actor.label} registró un interesado desde ${community.name}.`], { href: `/leads/${contactId}`, label: "Abrir lead" });
-    } catch { /* el aviso es de cortesía: no debe tumbar el registro */ }
-  }
+  await notifyOwner(db, finalOwner, contactId, `${actor.label} registró un interesado desde ${community.name}.`);
   return { contactId, ownerId: finalOwner, created };
 }
 
-/** Captura suave de /comunidad: lead con atribución por UTM; no crea demo. */
+async function notifyOwner(db: Db, ownerId: string | null, contactId: string, text: string) {
+  if (!ownerId) return;
+  try {
+    const [o] = await db.select({ email: users.email }).from(users).where(eq(users.id, ownerId)).limit(1);
+    if (o) await notifyTeam([o.email], "Nuevo interesado de comunidad", [text], { href: `/leads/${contactId}`, label: "Abrir lead" });
+  } catch { /* el aviso es de cortesia: no debe tumbar el registro */ }
+}
+
+/** Captura suave de /comunidad: lead con atribución por UTM (con o sin comunidad resuelta); no crea demo. Entra al reparto Uriel/Chris. */
 export async function ingestCommunityCapture(
-  db: Db, p: { externalId?: string; fullName: string; email: string; utm: Record<string, string>; note?: string },
+  db: Db, p: { externalId?: string; fullName: string; email: string; utm: Record<string, string>; note?: string }, now: Date = new Date(),
 ): Promise<{ contactId: string; created: boolean }> {
   const attr = await resolveAttribution(db, p.utm);
+  const [existing] = await db.select({ ownerId: contacts.ownerId, leadRegisteredAt: contacts.leadRegisteredAt }).from(contacts).where(eq(contacts.email, normalizeEmail(p.email))).limit(1);
+  const alreadyWorked = !!existing && (!!existing.ownerId || !!existing.leadRegisteredAt);
+  const ownerId = alreadyWorked ? null : await db.transaction((tx) => assignCommunityLeadOwner(tx));
   const { id, created } = await upsertContact(db, {
     name: p.fullName, email: p.email, source: "landing_comunidad", tags: ["psychologist", "lead"], leadStatus: "nuevo",
     notes: p.note ?? null, utm: p.utm, communityId: attr.communityId, communityPostId: attr.postId,
     details: p.externalId ? { externalId: p.externalId } : {},
+    ...(alreadyWorked ? {} : { ownerId, leadRegisteredAt: now }),
   });
+  if (!alreadyWorked) await notifyOwner(db, ownerId, id, "Una persona se registró desde la página de comunidad.");
   return { contactId: id, created };
 }

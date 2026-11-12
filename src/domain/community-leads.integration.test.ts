@@ -98,6 +98,41 @@ describe.runIf(enabled)("comunidades: interesados y atribución", () => {
     expect(await resolveAttribution(db, { utm_term: post.code.toUpperCase() })).toMatchObject({ postId: post.id });
   });
 
+  it("captura de una persona nueva toma turno; la siguiente registerInterested recibe al otro", async () => {
+    const { db, t, uriel, chris, post, actor, community } = await setup();
+    const { contacts } = await import("@/db/schema");
+    const { ingestCommunityCapture, registerInterested } = await import("./community-leads");
+    const r = await ingestCommunityCapture(db, { fullName: "Cap Nueva", email: `capn${t}@example.com`, utm: { utm_medium: "comunidad", utm_content: community.slug } });
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, r.contactId));
+    expect(c.ownerId).toBe(uriel);
+    expect(c.leadRegisteredAt).not.toBeNull();
+    expect(c.registeredById).toBeNull();
+    const n = await registerInterested(db, { postId: post.id, name: "Sig", email: `sig${t}@example.com`, kind: "psicologo" }, actor);
+    expect(n.ownerId).toBe(chris);
+    // entrada directa sin comunidad resuelta tambien entra al reparto
+    const d = await ingestCommunityCapture(db, { fullName: "Directa", email: `dir${t}@example.com`, utm: { utm_source: "directo", utm_medium: "comunidad" } });
+    const [dc] = await db.select().from(contacts).where(eq(contacts.id, d.contactId));
+    expect(dc.ownerId).toBe(uriel);
+    expect(dc.communityId).toBeNull();
+  });
+
+  it("captura de un contacto que ya tenia dueno conserva dueno y fecha y no gasta turno", async () => {
+    const { db, t, uriel, euridice, community } = await setup();
+    const { contacts } = await import("@/db/schema");
+    const { upsertContact } = await import("./contacts");
+    const { ingestCommunityCapture } = await import("./community-leads");
+    const email = `capv${t}@example.com`;
+    const before = new Date("2026-10-01T10:00:00Z");
+    const { id } = await upsertContact(db, { name: "Vieja", email, source: "manual", tags: ["lead"], ownerId: euridice, leadRegisteredAt: before });
+    await ingestCommunityCapture(db, { fullName: "Vieja", email, utm: { utm_medium: "comunidad", utm_content: community.slug } });
+    const [c] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(c.ownerId).toBe(euridice);
+    expect(c.leadRegisteredAt?.getTime()).toBe(before.getTime());
+    const n = await ingestCommunityCapture(db, { fullName: "Otra", email: `capo${t}@example.com`, utm: { utm_medium: "comunidad" } });
+    const [nc] = await db.select().from(contacts).where(eq(contacts.id, n.contactId));
+    expect(nc.ownerId).toBe(uriel);
+  });
+
   it("una demo real con UTM guarda los UTM en el contacto y sigue siendo demo_form", async () => {
     const { db, t } = await setup();
     const { contacts, demoRequests } = await import("@/db/schema");
