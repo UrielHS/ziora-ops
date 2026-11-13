@@ -10,6 +10,7 @@ import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
 import type { contacts, LeadStatus } from "@/db/schema";
 import type { TimelineItem } from "@/domain/leads";
+import { BUYER_TYPE, type BuyerType } from "@/domain/buyer-type";
 import type { Cadence } from "@/domain/sequences";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { CopyButton } from "@/components/ui/copy";
@@ -24,7 +25,11 @@ export function LeadPriorityBadge({ priority }: { priority: number | null }) {
 }
 
 /** Tarjeta del kanban: lo justo para decidir a quién tocar hoy. La casilla alimenta la barra de acciones en lote. */
-export function LeadCard({ c, owner, selectable = true }: { c: Lead; owner?: string | null; selectable?: boolean }) {
+const BUYER_TONE: Record<BuyerType, "green" | "blue" | "gray" | "lilac"> = {
+  institucional: "blue", intencion_alta: "green", volumen: "gray", fuera_embudo: "gray", influencer: "lilac",
+};
+
+export function LeadCard({ c, owner, selectable = true, buyerType }: { c: Lead; owner?: string | null; selectable?: boolean; buyerType?: BuyerType }) {
   const overdue = !!c.nextActionOn && c.nextActionOn < todayISO();
   const city = c.cityName ?? (c.city ? CITY[c.city] : null);
   return (
@@ -50,6 +55,7 @@ export function LeadCard({ c, owner, selectable = true }: { c: Lead; owner?: str
       <div className="flex flex-wrap items-center gap-1.5">
         <LeadPriorityBadge priority={c.priority} />
         {c.segment && <Badge tone="gray">{c.segment}</Badge>}
+        {buyerType && <Badge tone={BUYER_TONE[buyerType]}>{BUYER_TYPE[buyerType].label}</Badge>}
         <InvalidBadges c={c} />
       </div>
       {c.nextAction && (

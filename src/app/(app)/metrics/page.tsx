@@ -1,10 +1,10 @@
-import { count, eq, gte, sql } from "drizzle-orm";
+import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
 import { Check } from "lucide-react";
 import { updateGoalCurrent } from "@/actions/goals";
 import { Card, cn, PageHeader, PanelHeader, Progress } from "@/components/ui";
 import { db } from "@/db";
 import { goalsWithValues, gtmDay, gtmPhase } from "@/db/goals";
-import { bugs, campaignSends, contentPieces, demoRequests } from "@/db/schema";
+import { appUsers, bugs, campaignSends, contentPieces, demoRequests } from "@/db/schema";
 import { pct } from "@/lib/format";
 import { CONTENT_PILLAR, DEMO_STAGE } from "@/lib/labels";
 
@@ -14,7 +14,7 @@ export default async function MetricsPage() {
   const day = gtmDay();
   const phase = gtmPhase(day);
   const since = new Date(Date.now() - 56 * 86400000);
-  const [goals, stages, weekly, pillars, sends, bugFlow] = await Promise.all([
+  const [goals, stages, weekly, pillars, sends, bugFlow, [act]] = await Promise.all([
     goalsWithValues(),
     db.select({ stage: demoRequests.stage, n: count() }).from(demoRequests).groupBy(demoRequests.stage),
     db.select({ wk: sql<string>`to_char(date_trunc('week', ${demoRequests.createdAt} at time zone 'America/Mexico_City'), 'YYYY-MM-DD')`, n: count() })
@@ -22,6 +22,13 @@ export default async function MetricsPage() {
     db.select({ pillar: contentPieces.pillar, n: count() }).from(contentPieces).where(eq(contentPieces.status, "published")).groupBy(contentPieces.pillar),
     db.select({ status: campaignSends.status, n: count() }).from(campaignSends).groupBy(campaignSends.status),
     db.select({ open: sql<number>`count(*) filter (where ${bugs.status} in ('new','triaged','in_progress'))::int`, fixed: sql<number>`count(*) filter (where ${bugs.status} in ('fixed','verified'))::int` }).from(bugs),
+    // Activación (aproximada): usuarios reales con al menos una nota. La regla de 72 h necesita que la app mande la fecha de la primera nota.
+    db.select({
+      users: sql<number>`count(*)::int`,
+      activated: sql<number>`count(*) filter (where ${appUsers.notesTotal} > 0)::int`,
+      newWeek: sql<number>`count(*) filter (where ${appUsers.signedUpAt} >= now() - interval '7 days')::int`,
+      newWeekActivated: sql<number>`count(*) filter (where ${appUsers.signedUpAt} >= now() - interval '7 days' and ${appUsers.notesTotal} > 0)::int`,
+    }).from(appUsers).where(and(eq(appUsers.isTest, false), isNull(appUsers.removedAt))),
   ]);
   const weeks = Array.from({ length: 8 }, (_, i) => {
     const d = new Date(Date.now() - (7 - i) * 7 * 86400000);
@@ -124,6 +131,18 @@ export default async function MetricsPage() {
               ["Correos enviados", sentTotal], ["Tasa de apertura", `${pct(s("opened", "clicked"), sentTotal)}%`],
               ["Tasa de clic", `${pct(s("clicked"), sentTotal)}%`], ["Rebotes + spam", `${pct(s("bounced", "complained"), sentTotal)}%`],
               ["Bugs abiertos", bugFlow[0].open], ["Bugs corregidos", bugFlow[0].fixed],
+            ].map(([l, v]) => (
+              <div key={l as string}><p className="text-2xl font-extrabold">{v}</p><p className="text-[11px] text-muted">{l}</p></div>
+            ))}
+          </div>
+        </Card>
+        <Card className="p-5">
+          <p className="label">Activación de usuarios</p>
+          <p className="mt-1 text-[11px] text-muted">Activado = hizo al menos una nota en Ziora. Sin cuentas de prueba. La regla de «primera nota en 72 h» queda pendiente de que la app mande la fecha de la primera nota.</p>
+          <div className="mt-3 grid grid-cols-2 gap-4">
+            {[
+              ["Usuarios activados", `${act.activated} de ${act.users}`], ["Tasa de activación", `${pct(act.activated, act.users)}%`],
+              ["Registros en 7 días", act.newWeek], ["De ellos, activados", `${act.newWeekActivated} · ${pct(act.newWeekActivated, act.newWeek)}%`],
             ].map(([l, v]) => (
               <div key={l as string}><p className="text-2xl font-extrabold">{v}</p><p className="text-[11px] text-muted">{l}</p></div>
             ))}
