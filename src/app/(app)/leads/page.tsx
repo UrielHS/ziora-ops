@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, eq, exists, ilike, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { bulkLeadsAction } from "@/actions/leads";
 import { LeadCard, LeadsBoard } from "@/components/leads";
 import { SelectAll } from "@/components/select-all";
@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
 import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
 import { LEAD_ORDER, ownerFilter } from "@/domain/leads";
+import { BUYER_TYPE, classifyBuyerType, isBuyerType, type BuyerType } from "@/domain/buyer-type";
 import { appReportsReferrals, referralsBySeller } from "@/domain/referrals";
 import { todayISO } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG, LEAD_PRIORITY, LEAD_STATUS } from "@/lib/labels";
@@ -16,7 +17,7 @@ import { can } from "@/lib/permissions";
 import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string; redes?: string };
+type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string; redes?: string; tipo?: string };
 
 const ACCENT: Record<string, string> = {
   nuevo: "bg-faint", contactado: "bg-[#1D5FA8]", respondio: "bg-[#6B4FA8]", demo_agendada: "bg-[#1D5FA8]", en_trial: "bg-[#D99A2B]", pago: "bg-emerald", perdido: "bg-danger",
@@ -56,6 +57,16 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name),
   ]);
   const ownerName = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
+
+  // Tipo de comprador: se calcula al vuelo (no se guarda ni cambia dueño, etapa o secuencia). Ver domain/buyer-type.ts.
+  const rowTags = rows.length
+    ? await db.select({ contactId: contactTags.contactId, tag: contactTags.tag }).from(contactTags).where(inArray(contactTags.contactId, rows.map((r) => r.id)))
+    : [];
+  const tagsOf = new Map<string, string[]>();
+  for (const t of rowTags) tagsOf.set(t.contactId, [...(tagsOf.get(t.contactId) ?? []), t.tag]);
+  const buyerOf = new Map<string, BuyerType>(rows.map((c) => [c.id, classifyBuyerType({ ...c, tags: tagsOf.get(c.id) })]));
+  const tipo = isBuyerType(sp.tipo) ? sp.tipo : null;
+  const visible = tipo ? rows.filter((c) => buyerOf.get(c.id) === tipo) : rows;
   const columns = [
     ...LEAD_ORDER.map((s) => ({ id: s, label: LEAD_STATUS[s].label, accent: ACCENT[s] })),
     { id: "perdido", label: LEAD_STATUS.perdido.label, accent: ACCENT.perdido },
@@ -102,6 +113,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         <Select name="etiqueta" defaultValue={sp.etiqueta} placeholder="Todas las etiquetas" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_TAG)} />
         <Select name="ciudad" defaultValue={sp.ciudad} placeholder="Todas las ciudades" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CITY)} />
         <Select name="redes" defaultValue={sp.redes} placeholder="Sin filtro de redes" className="w-auto rounded-full py-1.5 text-xs" options={[["todos", "Todos los de redes"], ["psicologo", "Redes: psicólogos"], ["influencer", "Redes: influencers"]]} />
+        <Select name="tipo" defaultValue={sp.tipo} placeholder="Todo tipo de comprador" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(BUYER_TYPE).map(([k, v]) => [k, v.label])} />
         <Select name="dueno" defaultValue={sp.dueno} placeholder="Cualquier dueño" className="w-auto rounded-full py-1.5 text-xs" options={[["ninguno", "Sin dueño"], ...userOptions(users)]} />
         <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">
           <input type="checkbox" name="todos" value="1" defaultChecked={sp.todos === "1"} className="h-3.5 w-3.5 accent-emerald" />
@@ -133,10 +145,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         <LeadsBoard
           columns={columns}
           canManage={canManage}
-          items={rows.map((c) => ({ id: c.id, column: c.leadStatus!, node: <LeadCard c={c} owner={ownerName(c.ownerId)} selectable={canManage} /> }))}
+          items={visible.map((c) => ({ id: c.id, column: c.leadStatus!, node: <LeadCard c={c} owner={ownerName(c.ownerId)} selectable={canManage} buyerType={buyerOf.get(c.id)} /> }))}
         />
       </ActionForm>
-      {rows.length === 0 && <p className="text-sm text-muted">Sin leads con estos filtros. Importa la hoja desde Contactos o quita el filtro &quot;solo los míos&quot;.</p>}
+      {visible.length === 0 && <p className="text-sm text-muted">Sin leads con estos filtros. Importa la hoja desde Contactos o quita el filtro &quot;solo los míos&quot;.</p>}
 
       {canManage && (
         <Card>
