@@ -111,6 +111,15 @@ describe.runIf(enabled)("leads: estados, actividades y toques", () => {
     const acts = await db.select().from(contactActivities).where(eq(contactActivities.contactId, id));
     expect(acts.find((a) => a.direction === "entrante")?.summary).toBe("Dijo que sí le interesa");
     expect(acts.some((a) => a.type === "sistema" && a.summary.includes(someone.name))).toBe(true);
+
+    // Reasignar al mismo dueño no agrega otra línea al historial; quitar el dueño sí.
+    const owned = () => db.select().from(contactActivities).where(eq(contactActivities.contactId, id)).then((r) => r.filter((a) => (a.meta as { ownerId?: unknown } | null)?.ownerId !== undefined).length);
+    const before = await owned();
+    await assignOwner(db, [id], someone.id, actor);
+    expect(await owned()).toBe(before);
+    await assignOwner(db, [id], null, actor);
+    expect(await owned()).toBe(before + 1);
+    expect((await db.select().from(contacts).where(eq(contacts.id, id)))[0].ownerId).toBeNull();
   });
 
   it("demo agendada avanza al lead y cancelar no lo retrocede", async () => {

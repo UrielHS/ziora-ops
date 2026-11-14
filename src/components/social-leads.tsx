@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { CalendarClock, ExternalLink } from "lucide-react";
+import { useState, useTransition } from "react";
+import { CalendarClock, ExternalLink, Sparkles } from "lucide-react";
 import { markRepliedAction, postponeAction, setLeadStatusAction } from "@/actions/leads";
-import { addContactChannelAction, closeDealAction, recordDmAction, recordOpinionAction, setInfluencerStageAction, setSocialLeadTypeAction } from "@/actions/social-leads";
+import { addContactChannelAction, closeDealAction, generateDmAction, recordDmAction, recordOpinionAction, setInfluencerStageAction, setSocialLeadTypeAction } from "@/actions/social-leads";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { CopyButton } from "@/components/ui/copy";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import type { contacts, InfluencerDeal } from "@/db/schema";
 import { canMoveStage, DM_DAILY_WARN, dmOpen, socialProfileUrl, usesZiora } from "@/domain/social-shared";
 import { fmtDate, todayISO } from "@/lib/format";
+import { countLabel } from "@/lib/sort";
 import { DEAL_KIND, INFLUENCER_STAGE, SOCIAL_LEAD_TYPE, SOCIAL_PLATFORM, SOCIAL_TIER } from "@/lib/labels";
 import { LeadPriorityBadge, LeadStatusBadge } from "./leads";
 
@@ -50,10 +51,57 @@ export function OpenProfileButton({ url, text }: { url: string; text: string }) 
   );
 }
 
-/** Mensaje del paso: texto, Copiar y los botones de registro. */
+/**
+ * «Generar mensaje»: el texto no se muestra hasta que Ale lo pide. La IA lo personaliza (con la bio si la pega);
+ * si falla, llega el mensaje aprobado. El resultado se puede editar antes de copiarlo.
+ */
+function DmGenerator({ c, url, rows }: { c: Lead; url: string | null; rows: number }) {
+  const [bio, setBio] = useState("");
+  // En la ficha empieza abierto; en Mi día cerrado. Después lo decide quien lo usa.
+  const [bioOpen, setBioOpen] = useState(rows > 3);
+  const [text, setText] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const generate = () => start(async () => {
+    setNote(null);
+    try {
+      const r = await generateDmAction({ id: c.id, bio: bio.trim() || undefined });
+      if ("error" in r) return setNote(r.error);
+      setText(r.text);
+      if (!r.ai) setNote(r.note ?? "Te dejo el mensaje aprobado.");
+    } catch {
+      setNote("No se pudo generar. Intenta de nuevo.");
+    }
+  });
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <details className="text-xs" open={bioOpen} onToggle={(e) => setBioOpen(e.currentTarget.open)}>
+        <summary className="cursor-pointer text-muted">Pegar su bio o un post reciente (opcional, personaliza mejor)</summary>
+        <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} maxLength={1500}
+          placeholder="Abre su perfil, copia su bio o el texto de un post y pégalo aquí"
+          className={cn(inputCls, "mt-1.5 py-1.5 text-xs")} />
+      </details>
+      {text !== null && (
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={Math.max(rows, Math.min(12, text.split("\n").length + 1))}
+          aria-label="Mensaje para copiar" className="w-full resize-y rounded-xl border border-line bg-white p-2.5 text-sm outline-none focus:border-ink/30" />
+      )}
+      {note && <p role="status" className="text-[11px] text-muted">{note}</p>}
+      <div className="flex flex-wrap items-start gap-2">
+        <button type="button" onClick={generate} disabled={pending}
+          className={cn(btn(text === null ? "primary" : "ghost", "sm"), "!py-1.5 !text-xs")}>
+          <Sparkles className="h-3.5 w-3.5" /> {pending ? "Generando…" : text === null ? "Generar mensaje" : "Generar otro"}
+        </button>
+        {text && <CopyButton text={text} />}
+        {text && url && <OpenProfileButton url={url} text={text} />}
+      </div>
+    </div>
+  );
+}
+
+/** Mensaje del paso: botón «Generar mensaje» y los botones de registro. */
 function DmBlock({ c, dm, canManage, rows, noLink }: { c: Lead; dm: DmView; canManage: boolean; rows: number; noLink?: boolean }) {
   const url = profileUrl(c);
-  // Sin liga el texto tendría un hueco: no se ofrece copiarlo ni registrar el DM.
+  // Sin liga el texto tendría un hueco: no se ofrece generarlo ni registrar el DM.
   const usable = !!dm && !noLink && !!dm.text;
   const open = dmOpen(c.leadStatus);
   return (
@@ -64,22 +112,21 @@ function DmBlock({ c, dm, canManage, rows, noLink }: { c: Lead; dm: DmView; canM
         <p className="text-sm text-muted">Ya se mandaron los tres mensajes. Si no responde, márcalo perdido.</p>
       ) : (
         <div className="rounded-2xl border border-line bg-[#FBFAF6] p-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="label">{STEP_LABEL[dm.step]}</p>
-            {dm.text && !noLink && <CopyButton text={dm.text} />}
-          </div>
+          <p className="label">{STEP_LABEL[dm.step]}</p>
           {noLink ? (
             <p className="mt-1 text-sm text-muted">Abre la ficha para generar su liga</p>
-          ) : dm.text ? (
-            <textarea readOnly value={dm.text} rows={rows} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
-          ) : (
+          ) : !dm.text ? (
             <p className="mt-1 text-sm text-muted">Este mensaje aún no está aprobado por dirección</p>
+          ) : canManage ? (
+            // key: al registrar el DM cambia el paso y el generador vuelve a empezar.
+            <DmGenerator key={`${c.id}-${dm.step}`} c={c} url={url} rows={rows} />
+          ) : (
+            <textarea readOnly value={dm.text} rows={rows} className="mt-1 w-full resize-none bg-transparent text-sm outline-none" />
           )}
         </div>
       )}
       {canManage && (
         <div className="flex flex-wrap items-start gap-2">
-          {usable && dm.text && url && <OpenProfileButton url={url} text={dm.text} />}
           {usable && (
             <ActionForm action={recordDmAction} className="contents">
               <input type="hidden" name="id" value={c.id} />
@@ -108,7 +155,7 @@ export function SocialPanel({ c, dm, inviteUrl, promoUrl, canManage, inviteClick
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="font-bold hover:underline">@{c.socialHandle}</a> : <span className="font-bold">@{c.socialHandle}</span>}
         {c.socialPlatform && <Badge tone="gray">{SOCIAL_PLATFORM[c.socialPlatform]}</Badge>}
-        {c.socialFollowers && <span className="text-xs text-muted">{c.socialFollowers} seguidores</span>}
+        {countLabel(c.socialFollowers) && <span className="text-xs text-muted">{countLabel(c.socialFollowers)} seguidores</span>}
         {c.socialTier && <Badge tone="gray">{SOCIAL_TIER[c.socialTier]}</Badge>}
         {c.socialLeadType && <Badge tone="gray">{SOCIAL_LEAD_TYPE[c.socialLeadType]}</Badge>}
       </div>
@@ -164,7 +211,7 @@ export function SocialTodayRow({ c, owner, dm, canManage, noLink }: { c: Lead; o
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/leads/${c.id}`} className="text-sm font-bold hover:underline">{c.name}</Link>
         {url && <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted hover:underline">@{c.socialHandle}</a>}
-        {c.socialFollowers && <span className="text-xs text-muted">{c.socialFollowers}</span>}
+        {countLabel(c.socialFollowers) && <span className="text-xs text-muted">{countLabel(c.socialFollowers)}</span>}
         <LeadPriorityBadge priority={c.priority} />
         <LeadStatusBadge status={c.leadStatus} />
         {c.socialLeadType && <Badge tone="gray">{SOCIAL_LEAD_TYPE[c.socialLeadType]}</Badge>}

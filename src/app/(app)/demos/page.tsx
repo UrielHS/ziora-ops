@@ -4,6 +4,8 @@ import { ActionForm, Submit } from "@/components/ui/form";
 import { DemoCard, NewDemoButton } from "@/components/demos";
 import { Card, PageHeader } from "@/components/ui";
 import { Kanban } from "@/components/ui/kanban";
+import { SortControl } from "@/components/ui/sort";
+import { parseCount, resolveSort, sortRows, type SortValue } from "@/lib/sort";
 import { db } from "@/db";
 import { listUsers } from "@/db/queries";
 import { demoRequests, contacts } from "@/db/schema";
@@ -16,14 +18,22 @@ export const dynamic = "force-dynamic";
 const COLUMNS = ["requested", "scheduled", "done", "trial", "paid", "lost"] as const;
 const ACCENT: Record<string, string> = { requested: "bg-faint", scheduled: "bg-[#1D5FA8]", done: "bg-[#6B4FA8]", trial: "bg-[#D99A2B]", paid: "bg-emerald", lost: "bg-danger" };
 
-export default async function DemosPage({ searchParams }: { searchParams: Promise<{ nuevo?: string }> }) {
+const SORT_OPTIONS = [["alta", "Fecha de solicitud"], ["cita", "Fecha de la demo"], ["nombre", "Nombre"], ["pacientes", "Pacientes por semana"]] as const;
+const SORT_KEYS = SORT_OPTIONS.map(([k]) => k);
+// «Fecha de la demo» asc = la más próxima primero.
+const TEXT_KEYS = ["nombre", "cita"] as const;
+
+export default async function DemosPage({ searchParams }: { searchParams: Promise<{ nuevo?: string; orden?: string; dir?: string }> }) {
   await requirePagePermission("leads.view");
   const sp = await searchParams;
   const [users, rows] = await Promise.all([
     listUsers(),
     db.select({ demo: demoRequests, city: contacts.city }).from(demoRequests).leftJoin(contacts, eq(contacts.id, demoRequests.contactId)).orderBy(desc(demoRequests.createdAt)),
   ]);
-  const demos = rows.map((r) => ({ ...r.demo, city: r.city }));
+  const sort = resolveSort(sp, { keys: SORT_KEYS, def: "alta", textKeys: TEXT_KEYS });
+  const sortValue = (d: (typeof rows)[number]["demo"]): SortValue =>
+    sort.key === "cita" ? d.scheduledAt : sort.key === "nombre" ? d.fullName : sort.key === "pacientes" ? parseCount(d.patientsPerWeek) : d.createdAt;
+  const demos = sortRows(rows.map((r) => ({ ...r.demo, city: r.city })), sort.dir, sortValue);
   const by = (s: string[]) => demos.filter((d) => s.includes(d.stage)).length;
   const total = demos.length;
   const reached = by(["done", "trial", "paid"]);
@@ -62,6 +72,9 @@ export default async function DemosPage({ searchParams }: { searchParams: Promis
           </div>
         ))}
       </Card>
+      <div className="flex justify-end">
+        <SortControl options={SORT_OPTIONS} current={sort.key} dir={sort.dir} textKeys={TEXT_KEYS} />
+      </div>
       <Kanban
         columns={COLUMNS.map((c) => ({ id: c, label: c === "lost" ? "Perdida / no asistió" : DEMO_STAGE[c].label, accent: ACCENT[c] }))}
         items={demos.map((d) => ({ id: d.id, column: d.stage === "no_show" ? "lost" : d.stage, node: <DemoCard d={d} users={users} /> }))}

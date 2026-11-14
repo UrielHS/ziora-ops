@@ -2,14 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { Building2, Mail, MailX, MessageCircle, Phone } from "lucide-react";
-import { convertToAccountAction } from "@/actions/leads";
+import { assignOwnerAction, convertToAccountAction } from "@/actions/leads";
 import { ActionForm, Submit } from "@/components/ui/form";
 import { AttributionPanel } from "@/components/communities";
 import { CadencePanel, ChannelInvalidButton, LeadPriorityBadge, LeadStatusBadge, LeadStatusForm, MyLinks, NextActionForm, NoteForm, Timeline, TouchButtons, WhatsAppButton } from "@/components/leads";
 import { CopyButton } from "@/components/ui/copy";
-import { Avatar, Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
+import { Avatar, Badge, btn, Card, PageHeader, PanelHeader, Select } from "@/components/ui";
 import { db } from "@/db";
-import { listUsers } from "@/db/queries";
+import { listUsers, userOptions } from "@/db/queries";
 import { accountContacts, accounts, appUsers, communities, communityPosts, contactConsents, contacts, contactTags, influencerDeals, sequences } from "@/db/schema";
 import { InfluencerPanel, SocialPanel, type DmView, type InfluencerAppUser } from "@/components/social-leads";
 import { shortLink } from "@/domain/community-posts";
@@ -122,7 +122,19 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <LeadPriorityBadge priority={c.priority} />
         {c.lostReason && <Badge tone="red">{c.lostReason}</Badge>}
         {tags.map((t) => <Badge key={t.tag} tone="gray">{CONTACT_TAG[t.tag] ?? t.tag}</Badge>)}
-        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><Avatar name={owner} size={20} />{owner ?? "Sin dueño"}</span>
+        {canManage ? (
+          // Reasignar: cambia el dueño de este lead (queda en el historial).
+          <ActionForm action={assignOwnerAction} className="ml-auto flex items-center gap-1.5">
+            <input type="hidden" name="ids[]" value={c.id} />
+            <Avatar name={owner} size={20} />
+            <label className="flex items-center"><span className="sr-only">Dueño</span>
+              <Select name="ownerId" defaultValue={c.ownerId ?? ""} placeholder="Sin dueño" className="w-auto py-1.5 text-xs" options={userOptions(users)} />
+            </label>
+            <Submit variant="ghost" className="!py-1.5 !text-xs">Reasignar</Submit>
+          </ActionForm>
+        ) : (
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><Avatar name={owner} size={20} />{owner ?? "Sin dueño"}</span>
+        )}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">

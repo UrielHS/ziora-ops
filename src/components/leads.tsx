@@ -8,6 +8,8 @@ import { addNoteAction, markRepliedAction, markTryingAction, moveLead, postponeA
 import { enrollAction, stopEnrollmentAction } from "@/actions/sequences";
 import { Avatar, Badge, btn, cn, inputCls, Select } from "@/components/ui";
 import { Kanban, type KanbanColumn, type KanbanItem } from "@/components/ui/kanban";
+import { SortTh } from "@/components/ui/sort";
+import { countLabel, type SortDir } from "@/lib/sort";
 import type { contacts, LeadStatus } from "@/db/schema";
 import type { TimelineItem } from "@/domain/leads";
 import { BUYER_TYPE, type BuyerType } from "@/domain/buyer-type";
@@ -49,8 +51,13 @@ export function LeadCard({ c, owner, selectable = true, buyerType }: { c: Lead; 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
         {c.jobTitle && <span className="truncate font-semibold text-ink">{c.jobTitle}</span>}
         {city && <span className="flex items-center gap-0.5"><MapPin className="h-3 w-3" />{city}</span>}
-        {c.socialHandle && <span className="truncate">@{c.socialHandle}</span>}
-        {c.socialHandle && c.socialFollowers && <span>· {c.socialFollowers}</span>}
+        {c.socialHandle && (
+          // Usuario y seguidores juntos: el «· 105K» no queda solo en otra línea.
+          <span className="flex min-w-0 max-w-full items-center gap-1">
+            <span className="truncate">@{c.socialHandle}</span>
+            {countLabel(c.socialFollowers) && <span className="shrink-0">· {countLabel(c.socialFollowers)}</span>}
+          </span>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <LeadPriorityBadge priority={c.priority} />
@@ -65,6 +72,64 @@ export function LeadCard({ c, owner, selectable = true, buyerType }: { c: Lead; 
           {c.nextActionOn && <span className="shrink-0">· {fmtDate(c.nextActionOn)}</span>}
         </p>
       )}
+    </div>
+  );
+}
+
+/** Vista de lista de leads: tabla con columnas ordenables (?orden=&dir=) y casillas para las acciones en bloque. */
+export function LeadsTable({ rows, ownerOf, buyerOf, selectable, sort, dir }: {
+  rows: Lead[]; ownerOf: Record<string, string | null>; buyerOf: Record<string, BuyerType | undefined>; selectable: boolean; sort: string; dir: SortDir;
+}) {
+  const today = todayISO();
+  const th = (k: string, label: string, natural: SortDir = "asc", align?: "right") => <SortTh k={k} label={label} current={sort} dir={dir} naturalDir={natural} align={align} />;
+  return (
+    <div className="card overflow-x-auto">
+      <table className="w-full min-w-[960px] text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-faint">
+            {selectable && <th className="w-10 py-2 pl-4"><span className="sr-only">Seleccionar</span></th>}
+            {th("nombre", "Lead")}
+            {th("estado", "Etapa")}
+            {th("prioridad", "Prioridad")}
+            {th("dueno", "Dueño")}
+            {th("ciudad", "Ciudad")}
+            {th("seguidores", "Seguidores", "desc", "right")}
+            {th("siguiente", "Siguiente paso")}
+            {th("contacto", "Último contacto", "desc")}
+            {th("alta", "Alta", "desc")}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((c) => {
+            const city = c.cityName ?? (c.city ? CITY[c.city] : null);
+            const overdue = !!c.nextActionOn && c.nextActionOn < today;
+            const buyer = buyerOf[c.id];
+            return (
+              <tr key={c.id} className="border-b border-[#EFEDE6] align-top last:border-b-0 hover:bg-[#FBFAF6]">
+                {selectable && <td className="py-2.5 pl-4"><input type="checkbox" name="ids[]" value={c.id} className="h-4 w-4 accent-emerald" aria-label={`Seleccionar ${c.name}`} /></td>}
+                <td className="max-w-[260px] px-2 py-2.5">
+                  <Link href={`/leads/${c.id}`} className="block truncate font-semibold hover:underline">{c.name}</Link>
+                  <span className="flex flex-wrap items-center gap-1 text-xs text-muted">
+                    {c.socialHandle ? <span className="truncate">@{c.socialHandle}</span> : c.jobTitle ? <span className="truncate">{c.jobTitle}</span> : null}
+                    {buyer && <Badge tone={BUYER_TONE[buyer]}>{BUYER_TYPE[buyer].label}</Badge>}
+                  </span>
+                </td>
+                <td className="px-2 py-2.5"><LeadStatusBadge status={c.leadStatus} /></td>
+                <td className="px-2 py-2.5"><LeadPriorityBadge priority={c.priority} /></td>
+                <td className="whitespace-nowrap px-2 py-2.5 text-xs">{ownerOf[c.id] ?? <span className="text-faint">Sin dueño</span>}</td>
+                <td className="px-2 py-2.5 text-xs text-muted">{city ?? "—"}</td>
+                <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs">{countLabel(c.socialFollowers) ?? "—"}</td>
+                <td className={cn("px-2 py-2.5 text-xs", overdue ? "font-semibold text-danger" : "text-muted")}>
+                  {c.nextAction ? <span className="line-clamp-2">{c.nextAction}</span> : "—"}
+                  {c.nextActionOn && <span className="block whitespace-nowrap">{fmtDate(c.nextActionOn)}</span>}
+                </td>
+                <td className="whitespace-nowrap px-2 py-2.5 text-xs text-muted">{c.lastContactAt ? fmtDate(c.lastContactAt) : "—"}</td>
+                <td className="whitespace-nowrap px-2 py-2.5 pr-4 text-xs text-muted">{fmtDate(c.createdAt)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

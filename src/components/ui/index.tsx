@@ -45,13 +45,15 @@ export function ViewAll({ href, label = "Ver todo" }: { href: string; label?: st
 
 export function PageHeader({ title, subtitle, actions, eyebrow }: { title: string; subtitle?: string; actions?: React.ReactNode; eyebrow?: string }) {
   return (
-    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
+    // Las acciones no se encogen ni se parten en renglones sueltos: el subtítulo es el que se ajusta.
+    // Debajo de lg (o con poco espacio) pasan abajo del título, alineadas a la izquierda.
+    <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
+      <div className="min-w-0 lg:flex-1">
         {eyebrow && <p className="label mb-1">{eyebrow}</p>}
         <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+        {subtitle && <p className="mt-1 max-w-3xl text-sm text-muted">{subtitle}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 lg:max-w-[55%] lg:shrink-0 lg:justify-end">{actions}</div>}
     </header>
   );
 }
