@@ -1,15 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const add = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(), unstable_rethrow: vi.fn() }));
 vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/session", () => ({ requirePermission: async () => ({ user: { id: "u1", name: "Ale" } }) }));
-vi.mock("@/domain/social-dm", () => ({ recordDm: vi.fn() }));
+vi.mock("@/domain/social-dm", () => ({ recordDm: vi.fn(), dmCounts: vi.fn(), dmFor: vi.fn(), dmLead: vi.fn(), loadDmMessages: vi.fn() }));
+vi.mock("@/domain/social-dm-ai", () => ({ generateDm: vi.fn(), DM_BIO_MAX: 1500 }));
+vi.mock("@/domain/social-links", () => ({ loadLinks: vi.fn() }));
+vi.mock("@/domain/community-posts", () => ({ shortLink: vi.fn() }));
 vi.mock("@/domain/social-leads", () => ({ addContactChannel: (...a: unknown[]) => add(...a), setSocialLeadType: vi.fn() }));
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const form = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+
+// La primera importación del módulo (zod + drizzle + dominio) tarda varios segundos con toda la suite en paralelo.
+beforeAll(async () => { await import("./social-leads"); }, 30_000);
 
 describe("addContactChannelAction", () => {
   beforeEach(() => { add.mockReset(); vi.spyOn(console, "error").mockImplementation(() => {}); });

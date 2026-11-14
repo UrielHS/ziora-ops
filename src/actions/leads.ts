@@ -31,6 +31,11 @@ function refresh(leadId?: string) {
   if (leadId) revalidatePath(`/contacts/${leadId}`);
 }
 
+function ownerMessage(n: number, ownerId?: string) {
+  if (n === 0) return "Sin cambios: ya tenía ese dueño";
+  return ownerId ? `${n} lead(s) asignado(s)` : `${n} lead(s) sin dueño`;
+}
+
 /** Arrastre en el kanban. Perdido se marca con su botón para capturar el motivo. */
 export async function moveLead(leadId: string, to: string): Promise<void | { error?: string }> {
   try {
@@ -103,9 +108,9 @@ const _postpone = formAction(z.object({ id, days: z.coerce.number().int().refine
 });
 
 const _assignOwner = formAction(z.object({ ids, ownerId: z.uuid().optional() }), async (d) => {
-  await assignOwner(db, d.ids, d.ownerId ?? null, await actor());
+  const n = await assignOwner(db, d.ids, d.ownerId ?? null, await actor());
   refresh();
-  return d.ownerId ? `${d.ids.length} lead(s) asignado(s)` : `${d.ids.length} lead(s) sin dueño`;
+  return ownerMessage(n, d.ownerId);
 });
 
 const _setPriority = formAction(z.object({ ids, priority: z.coerce.number().int().min(1).max(3).optional() }), async (d) => {
@@ -124,9 +129,9 @@ const _bulk = formAction(z.object({ ids, op: z.enum(["owner", "priority", "enrol
     return enrollMessage(r);
   }
   if (d.op === "owner") {
-    await assignOwner(db, d.ids, d.ownerId ?? null, a);
+    const n = await assignOwner(db, d.ids, d.ownerId ?? null, a);
     refresh();
-    return d.ownerId ? `${d.ids.length} lead(s) asignado(s)` : `${d.ids.length} lead(s) sin dueño`;
+    return ownerMessage(n, d.ownerId);
   }
   await setPriority(db, d.ids, (d.priority as 1 | 2 | 3 | undefined) ?? null, a);
   refresh();

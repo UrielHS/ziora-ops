@@ -105,7 +105,7 @@ export function promoStats(users: PromoUser[], prices: Price[], now: Date): { si
 
 export type InfluencerRow = {
   contactId: string; name: string; handle: string; platform: SocialPlatform; followers: string | null;
-  leadStatus: LeadStatus | null; stage: InfluencerStage | null;
+  leadStatus: LeadStatus | null; stage: InfluencerStage | null; ownerId: string | null;
   own: { registered: boolean; active: boolean; sessionsTotal: number; notesTotal: number; paying: boolean };
   deal: { kind: string; terms: string; closedOn: string } | null;
   promo: { code: string; clicks: number; signups: number; inTrial: number; paying: number } | null;
@@ -120,7 +120,7 @@ export async function loadInfluencerBoard(db: Db, now = new Date()): Promise<Inf
   const cs = await db
     .select({
       id: contacts.id, name: contacts.name, handle: contacts.socialHandle, platform: contacts.socialPlatform, followers: contacts.socialFollowers,
-      leadStatus: contacts.leadStatus, stage: contacts.influencerStage, uid: contacts.appUserUid,
+      leadStatus: contacts.leadStatus, stage: contacts.influencerStage, uid: contacts.appUserUid, ownerId: contacts.ownerId,
     })
     .from(contacts).where(eq(contacts.socialLeadType, "influencer"));
   if (!cs.length) return [];
@@ -145,7 +145,7 @@ export async function loadInfluencerBoard(db: Db, now = new Date()): Promise<Inf
     const d = dealBy.get(c.id);
     return {
       contactId: c.id, name: c.name, handle: c.handle ?? "", platform: (c.platform === "tiktok" ? "tiktok" : "instagram"), followers: c.followers,
-      leadStatus: c.leadStatus, stage: c.stage,
+      leadStatus: c.leadStatus, stage: c.stage, ownerId: c.ownerId,
       own: {
         registered: !!live, active: !!live && isActive(live.lastActiveAt, now),
         sessionsTotal: live?.sessionsTotal ?? 0, notesTotal: live?.notesTotal ?? 0, paying: !!live && isPaying(live, prices),

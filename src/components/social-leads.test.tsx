@@ -6,7 +6,7 @@ vi.mock("@/actions/leads", () => ({
   setLeadStatusAction: vi.fn(), setNextActionAction: vi.fn(), referralLinkSentAction: vi.fn(), markTryingAction: vi.fn(), setChannelInvalidAction: vi.fn(),
 }));
 vi.mock("@/actions/sequences", () => ({ enrollAction: vi.fn(), stopEnrollmentAction: vi.fn() }));
-vi.mock("@/actions/social-leads", () => ({ recordDmAction: vi.fn(), addContactChannelAction: vi.fn(), setSocialLeadTypeAction: vi.fn(), recordOpinionAction: vi.fn(), setInfluencerStageAction: vi.fn(), closeDealAction: vi.fn() }));
+vi.mock("@/actions/social-leads", () => ({ generateDmAction: vi.fn(), recordDmAction: vi.fn(), addContactChannelAction: vi.fn(), setSocialLeadTypeAction: vi.fn(), recordOpinionAction: vi.fn(), setInfluencerStageAction: vi.fn(), closeDealAction: vi.fn() }));
 
 const { SocialPanel, SocialTodayRow, DmCounter, InfluencerPanel } = await import("./social-leads");
 
@@ -19,12 +19,14 @@ const lead = {
 const url = "https://ziora-copilot.com/c/k7m2qxa";
 
 describe("SocialPanel", () => {
-  it("el panel muestra el mensaje del paso, el perfil y «Le escribí»", () => {
+  it("el panel no muestra el mensaje hasta «Generar mensaje»; ofrece pegar la bio y «Le escribí»", () => {
     const html = render(<SocialPanel c={lead} dm={{ key: "RI1", step: 1, text: "Hola, Ana…" }} inviteUrl={url} promoUrl={null} canManage />);
     expect(html).toContain("Primer mensaje");
-    expect(html).toContain("Hola, Ana…");
+    expect(html).toContain("Generar mensaje");
+    expect(html).toContain("Pegar su bio o un post reciente");
+    expect(html).not.toContain("Hola, Ana…");
+    expect(html).not.toContain("Copiar mensaje y abrir perfil"); // aparece después de generar
     expect(html).toContain("Le escribí");
-    expect(html).toContain("Copiar mensaje y abrir perfil");
     expect(html).toContain("https://www.instagram.com/psic.ana/");
     expect(html).toContain(url);
     expect(html).toContain("@psic.ana");
@@ -84,7 +86,8 @@ describe("SocialTodayRow", () => {
   it("muestra perfil, mensaje y acciones", () => {
     const html = render(<SocialTodayRow c={lead} owner="Ale" dm={dm1} canManage />);
     expect(html).toContain("https://www.instagram.com/psic.ana/");
-    expect(html).toContain("Hola, Ana…");
+    expect(html).toContain("Generar mensaje");
+    expect(html).not.toContain("Hola, Ana…");
     expect(html).toContain("Le escribí");
     expect(html).toContain("Respondió");
     expect(html).toContain("Perdido");

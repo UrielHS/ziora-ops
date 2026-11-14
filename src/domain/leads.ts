@@ -171,14 +171,20 @@ export async function markTrying(db: Dbx, contactId: string, actor: Actor): Prom
   return { ok: true };
 }
 
-export async function assignOwner(db: Dbx, contactIds: string[], ownerId: string | null, actor: Actor): Promise<void> {
-  if (!contactIds.length) return;
+/** Devuelve cuántos leads cambiaron de dueño (los que ya lo tenían no cuentan ni se registran). */
+export async function assignOwner(db: Dbx, contactIds: string[], ownerId: string | null, actor: Actor): Promise<number> {
+  if (!contactIds.length) return 0;
   const [owner] = ownerId ? await db.select({ name: users.name }).from(users).where(eq(users.id, ownerId)).limit(1) : [];
-  await db.transaction(async (tx) => {
-    await tx.update(contacts).set({ ownerId }).where(inArray(contacts.id, contactIds));
-    for (const contactId of contactIds) {
+  if (ownerId && !owner) throw new Error("Ese usuario no existe");
+  return db.transaction(async (tx) => {
+    // Solo los que cambian de dueño: reasignar al mismo no ensucia el historial.
+    const changed = await tx.update(contacts).set({ ownerId })
+      .where(and(inArray(contacts.id, contactIds), ownerId ? or(isNull(contacts.ownerId), sql`${contacts.ownerId} <> ${ownerId}`) : isNotNull(contacts.ownerId)))
+      .returning({ id: contacts.id });
+    for (const { id: contactId } of changed) {
       await logActivity(tx, { contactId, type: "sistema", actor, summary: owner ? `Asignado a ${owner.name}` : "Sin dueño", meta: { ownerId } });
     }
+    return changed.length;
   });
 }
 

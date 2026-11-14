@@ -10,11 +10,16 @@ import { contactConsents, demoRequests, cityEnum, contacts, contactSourceEnum, c
 import { fmtDate } from "@/lib/format";
 import { CITY, CONTACT_SOURCE, CONTACT_TAG } from "@/lib/labels";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { SortLabel } from "@/components/ui/sort";
+import { hrefWith, resolveSort } from "@/lib/sort";
 import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const PAGE = 40;
-type SP = { q?: string; tag?: string; city?: string; source?: string; consent?: string; page?: string; nuevo?: string };
+type SP = { q?: string; tag?: string; city?: string; source?: string; consent?: string; page?: string; nuevo?: string; orden?: string; dir?: string };
+
+const SORT_KEYS = ["nombre", "ciudad", "permiso", "actualizado", "alta"] as const;
+const TEXT_KEYS = ["nombre", "ciudad"] as const;
 
 const ZIORA_TAGS = ["psychologist", "lead", "clinic", "ziora_user"] as const;
 
@@ -44,6 +49,13 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
   if (sp.consent === "yes") where.push(eq(contactConsents.optIn, true));
   if (sp.consent === "no") where.push(or(isNull(contactConsents.optIn), eq(contactConsents.optIn, false))!);
 
+  // Orden por columna (?orden=&dir=). Los vacíos (sin ciudad) siempre al final.
+  const sort = resolveSort(sp, { keys: SORT_KEYS, def: "actualizado", textKeys: TEXT_KEYS });
+  const SORT_COL = {
+    nombre: sql`lower(${contacts.name})`, ciudad: sql`lower(coalesce(${contacts.cityName}, case ${contacts.city}::text ${sql.join(Object.entries(CITY).map(([k, v]) => sql`when ${k} then ${v}`), sql` `)} end))`,
+    permiso: sql`coalesce(${contactConsents.optIn}, false)`, actualizado: sql`${contacts.updatedAt}`, alta: sql`${contacts.createdAt}`,
+  } as const;
+  const orderBy = sort.dir === "asc" ? sql`${SORT_COL[sort.key]} asc nulls last` : sql`${SORT_COL[sort.key]} desc nulls last`;
   const base = db
     .select({ c: contacts, optIn: contactConsents.optIn, optedOutAt: contactConsents.optedOutAt, evidence: contactConsents.evidence })
     .from(contacts)
@@ -52,7 +64,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
   const users = await listUsers();
   const activeSequences = await db.select({ id: sequences.id, name: sequences.name }).from(sequences).where(eq(sequences.active, true)).orderBy(sequences.name);
   const [rows, [{ total }], [stats]] = await Promise.all([
-    base.orderBy(desc(contacts.updatedAt)).limit(PAGE).offset((page - 1) * PAGE),
+    base.orderBy(orderBy, desc(contacts.updatedAt)).limit(PAGE).offset((page - 1) * PAGE),
     db.select({ total: count() }).from(contacts).leftJoin(contactConsents, and(eq(contactConsents.contactId, contacts.id), eq(contactConsents.channel, "email"))).where(and(...where)),
     db.select({
       all: sql<number>`count(*)::int`,
@@ -144,18 +156,24 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       </div>
 
       <form className="flex flex-wrap items-center gap-2">
-        <input name="q" defaultValue={sp.q} placeholder="Nombre o correo" className={cn(inputCls, "w-56 rounded-full py-1.5")} />
+        <input name="q" defaultValue={sp.q} placeholder="Nombre o correo" aria-label="Buscar contacto" className={cn(inputCls, "w-56 rounded-full py-1.5")} />
         <Select name="tag" defaultValue={sp.tag} placeholder="Todas las etiquetas" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_TAG)} />
         <Select name="city" defaultValue={sp.city} placeholder="Todas las ciudades" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CITY)} />
         <Select name="source" defaultValue={sp.source} placeholder="Todos los orígenes" className="w-auto rounded-full py-1.5 text-xs" options={Object.entries(CONTACT_SOURCE)} />
         <Select name="consent" defaultValue={sp.consent} placeholder="Permiso: todos" className="w-auto rounded-full py-1.5 text-xs" options={[["yes", "Con permiso"], ["no", "Sin permiso"]]} />
         <button className={btn("ghost", "sm")}>Filtrar</button>
-        {Object.keys(sp).length > 0 && <Link href="/contacts" className="text-xs text-muted underline">Limpiar</Link>}
+        {sp.orden && <input type="hidden" name="orden" value={sp.orden} />}
+        {sp.dir && <input type="hidden" name="dir" value={sp.dir} />}
+        {(["q", "tag", "city", "source", "consent"] as const).some((k) => sp[k]) && <Link href={hrefWith("/contacts", {}, { orden: sp.orden, dir: sp.dir })} className="text-xs text-muted underline">Limpiar filtros</Link>}
       </form>
 
       <Card>
         <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)_auto] gap-3 border-b border-line px-5 py-2.5 md:grid">
-          {["Contacto", "Ciudad · origen", "Etiquetas", "Correo marketing", ""].map((h) => <span key={h} className="label">{h}</span>)}
+          <SortLabel k="nombre" label="Contacto" current={sort.key} dir={sort.dir} naturalDir="asc" />
+          <SortLabel k="ciudad" label="Ciudad · origen" current={sort.key} dir={sort.dir} naturalDir="asc" />
+          <span className="label">Etiquetas</span>
+          <SortLabel k="permiso" label="Correo marketing" current={sort.key} dir={sort.dir} />
+          <SortLabel k="actualizado" label="Actualizado" current={sort.key} dir={sort.dir} className="justify-self-end" />
         </div>
         {rows.length === 0 && <p className="p-6 text-sm text-muted">Sin contactos con estos filtros.</p>}
         {rows.map(({ c, optIn, optedOutAt, evidence }) => {

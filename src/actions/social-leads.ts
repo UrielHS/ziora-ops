@@ -1,11 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
+import { contacts } from "@/db/schema";
+import { shortLink } from "@/domain/community-posts";
 import { closeDeal, recordOpinion, setInfluencerStage } from "@/domain/influencers";
 import type { Actor } from "@/domain/leads";
-import { recordDm } from "@/domain/social-dm";
+import { dmCounts, dmFor, dmLead, loadDmMessages, recordDm } from "@/domain/social-dm";
+import { generateDm, DM_BIO_MAX, type DmAiResult } from "@/domain/social-dm-ai";
+import { loadLinks } from "@/domain/social-links";
 import { addContactChannel, setSocialLeadType } from "@/domain/social-leads";
 import { formAction, type ActionState } from "@/lib/action";
 import { requirePermission } from "@/lib/session";
@@ -89,3 +94,42 @@ export async function setSocialLeadTypeAction(prev: ActionState, fd: FormData) {
 export async function recordOpinionAction(prev: ActionState, fd: FormData) { return _recordOpinion(prev, fd); }
 export async function setInfluencerStageAction(prev: ActionState, fd: FormData) { return _setInfluencerStage(prev, fd); }
 export async function closeDealAction(prev: ActionState, fd: FormData) { return _closeDeal(prev, fd); }
+
+// Tope por persona para «Generar mensaje» (cada clic es una llamada de pago a Gemini). En memoria por instancia: basta para frenar clics repetidos.
+const DM_QUOTA = 30;
+const dmCalls = new Map<string, number[]>();
+function takeDmQuota(userId: string, now = Date.now()): boolean {
+  const recent = (dmCalls.get(userId) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= DM_QUOTA) return false;
+  dmCalls.set(userId, [...recent, now]);
+  return true;
+}
+
+/**
+ * «Generar mensaje»: personaliza con IA el DM que toca. Todo se calcula aquí (paso, mensaje aprobado, liga),
+ * el navegador solo manda el lead y la bio que pegó Ale. No escribe nada en la base.
+ */
+export async function generateDmAction(input: { id: string; bio?: string }): Promise<DmAiResult | { error: string }> {
+  const parsed = z.object({ id, bio: z.string().max(DM_BIO_MAX * 2).optional() }).safeParse(input);
+  if (!parsed.success) return { error: "Datos inválidos" };
+  const { user } = await requirePermission("leads.manage");
+  if (!takeDmQuota(user.id)) return { error: "Demasiados mensajes seguidos: espera un minuto" };
+  const [c] = await db.select().from(contacts).where(eq(contacts.id, parsed.data.id)).limit(1);
+  if (!c?.socialHandle) return { error: "Este lead no es de redes" };
+  const [counts, links, messages] = await Promise.all([dmCounts(db, [c.id]), loadLinks(db, [c.id]), loadDmMessages(db)]);
+  const invite = links.get(c.id)?.invite;
+  if (!invite) return { error: "Abre la ficha para generar su liga" };
+  const liga = shortLink(invite.code);
+  const yo = user.name.trim().split(/\s+/)[0] ?? user.name;
+  const lead = dmLead(c);
+  const dm = dmFor(lead, counts.get(c.id) ?? 0, messages, { yo, liga });
+  if (!dm) return { error: "Ya no toca mandarle DM" };
+  if (!dm.text) return { error: "Este mensaje aún no está aprobado por dirección" };
+  return generateDm({
+    lead: {
+      name: c.name, handle: c.socialHandle, platform: lead.socialPlatform === "tiktok" ? "TikTok" : lead.socialPlatform === "instagram" ? "Instagram" : "redes",
+      leadType: c.socialLeadType ?? "psicologo", approach: c.approach, city: c.cityName, followers: c.socialFollowers,
+    },
+    step: dm.step, base: dm.text, liga, bio: parsed.data.bio,
+  });
+}

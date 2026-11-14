@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { and, eq, exists, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { bulkLeadsAction } from "@/actions/leads";
-import { LeadCard, LeadsBoard } from "@/components/leads";
+import { LeadCard, LeadsBoard, LeadsTable } from "@/components/leads";
+import { SortControl } from "@/components/ui/sort";
 import { SelectAll } from "@/components/select-all";
 import { btn, Card, cn, inputCls, PageHeader, PanelHeader, Select } from "@/components/ui";
 import { ActionForm, Submit } from "@/components/ui/form";
@@ -9,6 +10,8 @@ import { db } from "@/db";
 import { listUsers, userOptions } from "@/db/queries";
 import { cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags, sequences } from "@/db/schema";
 import { LEAD_ORDER, ownerFilter } from "@/domain/leads";
+import { LEAD_SORT_OPTIONS, LEAD_SORT_TEXT, resolveLeadSort, sortLeads } from "@/domain/lead-sort";
+import { hrefWith } from "@/lib/sort";
 import { BUYER_TYPE, classifyBuyerType, isBuyerType, type BuyerType } from "@/domain/buyer-type";
 import { appReportsReferrals, referralsBySeller } from "@/domain/referrals";
 import { todayISO } from "@/lib/format";
@@ -17,7 +20,7 @@ import { can } from "@/lib/permissions";
 import { requirePagePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string; redes?: string; tipo?: string };
+type SP = { todos?: string; prioridad?: string; origen?: string; etiqueta?: string; ciudad?: string; q?: string; dueno?: string; redes?: string; tipo?: string; vista?: string; orden?: string; dir?: string };
 
 const ACCENT: Record<string, string> = {
   nuevo: "bg-faint", contactado: "bg-[#1D5FA8]", respondio: "bg-[#6B4FA8]", demo_agendada: "bg-[#1D5FA8]", en_trial: "bg-[#D99A2B]", pago: "bg-emerald", perdido: "bg-danger",
@@ -66,7 +69,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   for (const t of rowTags) tagsOf.set(t.contactId, [...(tagsOf.get(t.contactId) ?? []), t.tag]);
   const buyerOf = new Map<string, BuyerType>(rows.map((c) => [c.id, classifyBuyerType({ ...c, tags: tagsOf.get(c.id) })]));
   const tipo = isBuyerType(sp.tipo) ? sp.tipo : null;
-  const visible = tipo ? rows.filter((c) => buyerOf.get(c.id) === tipo) : rows;
+  const sort = resolveLeadSort(sp);
+  const vista = sp.vista === "lista" ? "lista" : "tablero";
+  const visible = sortLeads(tipo ? rows.filter((c) => buyerOf.get(c.id) === tipo) : rows, sort, ownerName);
+  // Filtros activos (sin vista ni orden): decide si se ofrece «Limpiar».
+  const filtering = (["q", "prioridad", "origen", "etiqueta", "ciudad", "redes", "tipo", "dueno", "todos"] as const).some((k) => sp[k]);
   const columns = [
     ...LEAD_ORDER.map((s) => ({ id: s, label: LEAD_STATUS[s].label, accent: ACCENT[s] })),
     { id: "perdido", label: LEAD_STATUS.perdido.label, accent: ACCENT.perdido },
@@ -86,7 +93,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       <PageHeader
         eyebrow="Ventas"
         title="Leads"
-        subtitle="Cada tarjeta es una persona con la que hay que hablar. Arrastra para cambiar de etapa; el motivo de pérdida se captura en la ficha."
+        subtitle="Cada lead es una persona con la que hay que hablar. En el tablero arrastra para cambiar de etapa; en la lista ordena por cualquier columna."
         actions={
           <>
             <Link href="/leads/influencers" className={btn("ghost", "sm")}>Influencers</Link>
@@ -119,9 +126,28 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
           <input type="checkbox" name="todos" value="1" defaultChecked={sp.todos === "1"} className="h-3.5 w-3.5 accent-emerald" />
           Ver todos, no solo los míos
         </label>
+        {/* Al filtrar se conservan la vista y el orden elegidos. */}
+        {sp.vista && <input type="hidden" name="vista" value={sp.vista} />}
+        {sp.orden && <input type="hidden" name="orden" value={sp.orden} />}
+        {sp.dir && <input type="hidden" name="dir" value={sp.dir} />}
         <button className={btn("ghost", "sm")}>Filtrar</button>
-        {Object.keys(sp).length > 0 && <Link href="/leads" className="text-xs text-muted underline">Limpiar</Link>}
+        {filtering && <Link href={hrefWith("/leads", {}, { vista: sp.vista, orden: sp.orden, dir: sp.dir })} className="text-xs text-muted underline">Limpiar filtros</Link>}
       </form>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <nav aria-label="Vista" className="inline-flex rounded-full border border-line bg-white p-0.5 text-xs font-semibold">
+            {(["tablero", "lista"] as const).map((v) => (
+              <Link key={v} href={hrefWith("/leads", sp, { vista: v === "lista" ? "lista" : undefined })} aria-current={vista === v ? "true" : undefined}
+                className={cn("rounded-full px-3 py-1.5", vista === v ? "bg-forest text-white" : "text-muted hover:text-ink")}>
+                {v === "tablero" ? "Tablero" : "Lista"}
+              </Link>
+            ))}
+          </nav>
+          <span className="text-xs text-muted">{visible.length} {visible.length === 1 ? "lead" : "leads"}</span>
+        </div>
+        <SortControl options={LEAD_SORT_OPTIONS} current={sort.key} dir={sort.dir} textKeys={LEAD_SORT_TEXT} />
+      </div>
 
       <ActionForm action={bulkLeadsAction} className="flex flex-col gap-3">
         {canManage && (
@@ -142,11 +168,19 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
             )}
           </Card>
         )}
-        <LeadsBoard
-          columns={columns}
-          canManage={canManage}
-          items={visible.map((c) => ({ id: c.id, column: c.leadStatus!, node: <LeadCard c={c} owner={ownerName(c.ownerId)} selectable={canManage} buyerType={buyerOf.get(c.id)} /> }))}
-        />
+        {vista === "lista" ? (
+          <LeadsTable
+            rows={visible} selectable={canManage} sort={sort.key} dir={sort.dir}
+            ownerOf={Object.fromEntries(visible.map((c) => [c.id, ownerName(c.ownerId)]))}
+            buyerOf={Object.fromEntries(visible.map((c) => [c.id, buyerOf.get(c.id)]))}
+          />
+        ) : (
+          <LeadsBoard
+            columns={columns}
+            canManage={canManage}
+            items={visible.map((c) => ({ id: c.id, column: c.leadStatus!, node: <LeadCard c={c} owner={ownerName(c.ownerId)} selectable={canManage} buyerType={buyerOf.get(c.id)} /> }))}
+          />
+        )}
       </ActionForm>
       {visible.length === 0 && <p className="text-sm text-muted">Sin leads con estos filtros. Importa la hoja desde Contactos o quita el filtro &quot;solo los míos&quot;.</p>}
 
