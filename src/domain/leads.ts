@@ -317,3 +317,20 @@ export function todayBuckets<T extends TodayLead>(rows: T[], cadence: Map<string
   const noPlan = noDate.filter((c) => !waiting(c)).sort((a, b) => prio(a) - prio(b));
   return { due, soon, noPlan, inSequence };
 }
+
+/**
+ * Pone a trabajar como lead un contacto que no lo era (lead_status null → nuevo) y, si no tiene dueño, le asigna uno.
+ * Si ya era lead no cambia su etapa. Devuelve si se agregó ahora.
+ */
+export async function startLead(db: Dbx, contactId: string, ownerId: string | null, actor: Actor, now = new Date()): Promise<{ added: boolean }> {
+  const [c] = await db.select({ leadStatus: contacts.leadStatus, ownerId: contacts.ownerId }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+  if (!c) throw new Error("El contacto no existe.");
+  const added = c.leadStatus === null;
+  if (added) {
+    await setLeadStatus(db, contactId, "nuevo", actor);
+    await db.update(contacts).set({ registeredById: actor.userId, leadRegisteredAt: now })
+      .where(and(eq(contacts.id, contactId), isNull(contacts.leadRegisteredAt)));
+  }
+  if (ownerId && !c.ownerId) await assignOwner(db, [contactId], ownerId, actor);
+  return { added };
+}

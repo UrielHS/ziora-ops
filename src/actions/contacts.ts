@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { contactConsents, cityEnum, contacts, contactSourceEnum, contactTagEnum, contactTags } from "@/db/schema";
 import { editContact, importFromEventOps, optOut, upsertContact } from "@/domain/contacts";
+import { startLead } from "@/domain/leads";
 import { importLeadSheet, parseLeadSheet } from "@/domain/lead-sheet";
 import { formAction, type ActionState } from "@/lib/action";
 import { requirePermission } from "@/lib/session";
@@ -21,9 +22,11 @@ const _createContact = formAction(
     notes: z.string().max(2000).optional(),
     optIn: z.literal("on").optional(),
     evidence: z.string().max(300).optional(),
+    asLead: z.literal("on").optional(),
+    ownerId: z.uuid().optional(),
   }),
   async (d) => {
-    await requirePermission("leads.manage");
+    const { user } = await requirePermission("leads.manage");
     if (d.optIn && !d.evidence) throw new Error("Indica cómo dio su permiso (formulario, evento, mensaje…)");
     const { id } = await upsertContact(db, {
       name: d.name, email: d.email, phone: d.phone, city: d.city ?? null, source: d.source, tags: d.tags,
@@ -31,6 +34,11 @@ const _createContact = formAction(
     });
     if (d.notes) await db.update(contacts).set({ notes: d.notes }).where(eq(contacts.id, id));
     revalidatePath("/contacts");
+    if (d.asLead) {
+      const { added } = await startLead(db, id, d.ownerId ?? null, { userId: user.id, label: user.name });
+      revalidatePath("/leads", "layout");
+      return added ? "Contacto guardado y agregado a Leads." : "Contacto guardado. Ya estaba en Leads.";
+    }
     return "Contacto guardado.";
   },
 );

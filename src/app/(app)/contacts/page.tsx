@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, count, desc, eq, exists, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { Link2, Mail, MailX, Phone } from "lucide-react";
 import { createContact, importLeadsCsv, setConsent, updateContact } from "@/actions/contacts";
+import { addToLeadsAction } from "@/actions/leads";
 import { Avatar, Badge, btn, Card, cn, Field, inputCls, PageHeader, Select } from "@/components/ui";
 import { ActionForm, Modal, Submit } from "@/components/ui/form";
 import { db } from "@/db";
@@ -38,7 +39,7 @@ function TagPicker({ selected = [] }: { selected?: string[] }) {
 }
 
 export default async function ContactsPage({ searchParams }: { searchParams: Promise<SP> }) {
-  await requirePagePermission("leads.view");
+  const access = await requirePagePermission("leads.view");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page ?? 1));
   const where: SQL[] = [];
@@ -127,6 +128,15 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
               </div>
               <Field label="Etiquetas"><TagPicker selected={["psychologist"]} /></Field>
               <Field label="Notas"><textarea name="notes" rows={2} className={inputCls} /></Field>
+              <div className="rounded-2xl border border-emerald/30 bg-mint/40 p-3">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" name="asLead" defaultChecked className="h-4 w-4 accent-[#059669]" /> Agregar a Leads (etapa «Nuevo»)
+                </label>
+                <p className="mt-1 text-xs text-muted">Sin esta casilla queda solo como contacto y no aparece en Leads.</p>
+                <Field label="Dueño" className="mt-2">
+                  <Select name="ownerId" defaultValue={access.user.id} placeholder="Sin dueño" options={userOptions(users)} />
+                </Field>
+              </div>
               <div className="rounded-2xl border border-line bg-white p-3">
                 <label className="flex items-center gap-2 text-sm font-semibold">
                   <input type="checkbox" name="optIn" className="h-4 w-4 accent-[#059669]" /> Tiene permiso para recibir correos
@@ -217,6 +227,19 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
                   {c.eventOpsContactId && <a href={`${eventOps}/contacts/${c.eventOpsContactId}`} target="_blank" className={btn("secondary", "sm")}><Link2 className="h-3.5 w-3.5" />Ver origen en Event Ops</a>}
                   {c.leadStatus && <Link href={`/leads/${c.id}`} className={btn("primary", "sm")}>Ver ficha de lead</Link>}
                 </div>
+                {!c.leadStatus && (
+                  <div className="rounded-2xl border border-emerald/30 bg-mint/40 p-4">
+                    <p className="text-sm font-bold">No está en Leads</p>
+                    <p className="mt-0.5 text-xs text-muted">Es solo un contacto. Agrégalo para trabajarlo en el embudo.</p>
+                    <ActionForm action={addToLeadsAction} className="mt-3 flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="id" value={c.id} />
+                      <Field label="Dueño">
+                        <Select name="ownerId" defaultValue={c.ownerId ?? access.user.id} placeholder="Sin dueño" className="w-auto" options={userOptions(users)} />
+                      </Field>
+                      <Submit>Agregar a Leads</Submit>
+                    </ActionForm>
+                  </div>
+                )}
                 {(c.jobTitle || c.patientsPerWeek || c.approach || c.documentation || c.aiUsage) && (
                   <div className="rounded-2xl border border-line bg-white p-4">
                     <p className="text-sm font-bold">Perfil del lead</p>

@@ -98,6 +98,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
           <>
             <Link href="/leads/influencers" className={btn("ghost", "sm")}>Influencers</Link>
             <Link href="/leads/secuencias" className={btn("ghost", "sm")}>Secuencias</Link>
+            {canManage && <Link href="/contacts?nuevo=1" className={btn("secondary")}>+ Lead</Link>}
             <Link href="/leads/hoy" className={btn("primary")}>Mi día</Link>
           </>
         }
