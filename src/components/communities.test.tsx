@@ -11,7 +11,7 @@ import type { QueueCandidate } from "@/domain/community-queue";
 
 const { AttributionPanel, GeneratePost, MembershipButtons, PostCard, PromoPolicyForm, PublishQueue, ReviewForm } = await import("./communities");
 const { copyAndOpen } = await import("@/lib/copy-and-open");
-const { buildPublishQueue, leastUsedKey, postBlockReason, WEEKLY_POSTS_PER_PUBLISHER } = await import("@/domain/community-queue");
+const { buildPublishQueue, leastUsedKey, postBlockReason, WEEKLY_POSTS_PER_PUBLISHER, DAILY_POSTS_PER_PUBLISHER } = await import("@/domain/community-queue");
 
 const LINK = "https://ziora-copilot.com/c/k7m2qx";
 const base = {
@@ -166,17 +166,24 @@ describe("cola de publicar", () => {
       mk("reciente", { priority: "A" }, 5), // publicado hace 5 días: no elegible
       mk("sin-politica", { promoPolicy: "desconocido" }), mk("alianza", { kind: "alianza" }), mk("por-revisar", { status: "por_revisar" }),
     ];
-    const { rows, remaining } = buildPublishQueue(cands, keys, 0, now);
-    expect(WEEKLY_POSTS_PER_PUBLISHER).toBe(3);
+    const { rows, remaining } = buildPublishQueue(cands, keys, 0, now, 3);
     expect(rows.map((r) => r.community.name)).toEqual(["a1", "a2", "b1"]); // A (más antiguo primero), luego B; el tope es 3
     expect(remaining).toBe(3);
   });
+  it("el cupo es 15 por semana y 10 por día (lo que se acabe primero)", () => {
+    expect(WEEKLY_POSTS_PER_PUBLISHER).toBe(15);
+    expect(DAILY_POSTS_PER_PUBLISHER).toBe(10);
+    const many = Array.from({ length: 20 }, (_, i) => mk(`g${String(i).padStart(2, "0")}`, {}, 90));
+    expect(buildPublishQueue(many, keys, 0, now).remaining).toBe(10); // tope diario
+    expect(buildPublishQueue(many, keys, 12, now, WEEKLY_POSTS_PER_PUBLISHER, 0).remaining).toBe(3); // tope semanal
+    expect(buildPublishQueue(many, keys, 10, now, WEEKLY_POSTS_PER_PUBLISHER, 10).rows).toEqual([]);
+  });
   it("lo ya publicado esta semana y lo ya copiado gastan cupo", () => {
     const cands = [mk("a1", {}, 90), mk("a2", {}, 80), mk("a3", {}, 70), mk("copiado", {}, 60, { postId: "p", code: "k7m2qx", text: "t", key: "M2" })];
-    const r = buildPublishQueue(cands, keys, 1, now);
+    const r = buildPublishQueue(cands, keys, 1, now, 3);
     expect(r.rows.map((x) => x.community.name)).toEqual(["copiado", "a1"]); // 3 − 1 publicado − 1 copiado = 1 nuevo
     expect(r.rows[0].defaultKey).toBe("M2");
-    expect(buildPublishQueue(cands, keys, 3, now).rows.map((x) => x.community.name)).toEqual(["copiado"]);
+    expect(buildPublishQueue(cands, keys, 3, now, 3).rows.map((x) => x.community.name)).toEqual(["copiado"]);
   });
   it("un post ya copiado sale de la cola si dejó de ser elegible (otra publicó hace poco)", () => {
     const stale = mk("copiado", {}, 0, { postId: "p", code: "k7m2qx", text: "t", key: "M1" });
@@ -199,5 +206,7 @@ describe("cola de publicar", () => {
     expect(withPost).toContain("Marcar publicado");
     const vacio = renderToStaticMarkup(<PublishQueue rows={[]} messageKeys={keys} remaining={0} publishedThisWeek={3} quota={3} />);
     expect(vacio).toContain("Ya completaste tus 3 posts de los últimos 7 días");
+    const hoy = renderToStaticMarkup(<PublishQueue rows={[]} messageKeys={keys} remaining={0} publishedThisWeek={10} quota={15} publishedToday={10} dailyQuota={10} />);
+    expect(hoy).toContain("Ya publicaste 10 posts en las últimas 24 horas");
   });
 });

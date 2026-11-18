@@ -5,8 +5,9 @@ import { baseMessages, communities, communityMemberships, communityPosts, type C
 import { eligibilityFor, postEligibility } from "./community-posts";
 import type { MembershipStatus } from "./communities";
 
-/** Cupo semanal por publicadora (decisión de Chris, 11-nov-2026). Configurable. */
-export const WEEKLY_POSTS_PER_PUBLISHER = 3;
+/** Cupo por publicadora: 15 posts en 7 días y máximo 10 en 24 h (Chris, 17-nov-2026; antes 3 por semana). */
+export const WEEKLY_POSTS_PER_PUBLISHER = 15;
+export const DAILY_POSTS_PER_PUBLISHER = 10;
 const DAY = 86_400_000;
 
 const PRIORITY_RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
@@ -35,6 +36,7 @@ export function leastUsedKey(keys: string[], usage: Record<string, number>): str
  */
 export function buildPublishQueue(
   candidates: QueueCandidate[], messageKeys: string[], publishedThisWeek: number, now: Date, quota = WEEKLY_POSTS_PER_PUBLISHER,
+  publishedToday = 0, dailyQuota = DAILY_POSTS_PER_PUBLISHER,
 ): { rows: PublishRow[]; remaining: number } {
   // Un post ya copiado tampoco se ofrece si dejó de ser elegible (p. ej. otra publicadora publicó en el grupo entretanto).
   const planned = candidates.filter((c) => c.planned && postEligibility(c.community, c.membership, c.lastPublishedAt, now).ok);
@@ -43,7 +45,7 @@ export function buildPublishQueue(
     (PRIORITY_RANK[a.community.priority ?? ""] ?? 3) - (PRIORITY_RANK[b.community.priority ?? ""] ?? 3)
     || (a.lastPublishedAt?.getTime() ?? 0) - (b.lastPublishedAt?.getTime() ?? 0)
     || a.community.name.localeCompare(b.community.name, "es"));
-  const remaining = Math.max(0, quota - publishedThisWeek - planned.length);
+  const remaining = Math.max(0, Math.min(quota - publishedThisWeek, dailyQuota - publishedToday) - planned.length);
   const rows = [...planned, ...fresh.slice(0, remaining)].map((c) => ({
     ...c, defaultKey: c.planned?.key ?? leastUsedKey(messageKeys, c.usage),
   }));
@@ -54,8 +56,8 @@ export function buildPublishQueue(
  * Posts que cuentan contra el cupo: publicados en los últimos 7 días + planeados (generados en los últimos 7 días)
  * que siguen siendo elegibles. Es la misma regla que usa la cola de la pantalla, así que «Llevas» y el tope coinciden.
  */
-export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Date(), excludeCommunityId?: string): Promise<number> {
-  const weekAgo = new Date(now.getTime() - 7 * DAY);
+export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Date(), excludeCommunityId?: string, days = 7): Promise<number> {
+  const weekAgo = new Date(now.getTime() - days * DAY);
   const rows = await db.select({ communityId: communityPosts.communityId, status: communityPosts.status }).from(communityPosts)
     .where(and(
       eq(communityPosts.publisherId, userId),
@@ -79,10 +81,12 @@ export async function weeklyPostsUsed(db: Db, userId: string, now: Date = new Da
 export async function assertWeeklyQuota(db: Db, userId: string, now: Date = new Date(), replacingInCommunityId?: string): Promise<void> {
   const used = await weeklyPostsUsed(db, userId, now, replacingInCommunityId);
   if (used >= WEEKLY_POSTS_PER_PUBLISHER) throw new Error(`Ya llegaste a tus ${WEEKLY_POSTS_PER_PUBLISHER} posts de los últimos 7 días`);
+  const today = await weeklyPostsUsed(db, userId, now, replacingInCommunityId, 1);
+  if (today >= DAILY_POSTS_PER_PUBLISHER) throw new Error(`Ya llegaste a tus ${DAILY_POSTS_PER_PUBLISHER} posts de las últimas 24 horas`);
 }
 
 export type PublisherView = {
-  queue: PublishRow[]; remaining: number; publishedThisWeek: number; messageKeys: string[];
+  queue: PublishRow[]; remaining: number; publishedThisWeek: number; publishedToday: number; messageKeys: string[];
   toJoin: { community: Pick<Community, "id" | "name" | "url" | "platform" | "priority">; membership: MembershipStatus | null }[];
   toReply: { postId: string; code: string; communityName: string; postUrl: string | null; publishedAt: Date | null; clicks: number }[];
 };
@@ -128,13 +132,15 @@ export async function loadPublisherView(db: Db, userId: string, now: Date = new 
   const candidates: QueueCandidate[] = groups.filter((g) => membershipOf.get(g.id) === "unida").map((g) => ({
     community: g, membership: "unida" as const, lastPublishedAt: lastAt.get(g.id) ?? null, usage: usage.get(g.id) ?? {}, planned: plannedBy.get(g.id) ?? null,
   }));
-  const { rows, remaining } = buildPublishQueue(candidates, messageKeys, published.length, now);
+  const dayAgo = now.getTime() - DAY;
+  const publishedToday = published.filter((r) => r.p.publishedAt && r.p.publishedAt.getTime() >= dayAgo).length;
+  const { rows, remaining } = buildPublishQueue(candidates, messageKeys, published.length, now, WEEKLY_POSTS_PER_PUBLISHER, publishedToday);
   const toJoin = groups
     .filter((g) => { const m = membershipOf.get(g.id) ?? null; return m === null || m === "por_solicitar" || m === "solicitud_enviada"; })
     .sort((a, b) => (PRIORITY_RANK[a.priority ?? ""] ?? 3) - (PRIORITY_RANK[b.priority ?? ""] ?? 3) || a.name.localeCompare(b.name, "es"))
     .map((g) => ({ community: g, membership: membershipOf.get(g.id) ?? null }));
   return {
-    queue: rows, remaining, publishedThisWeek: published.length, messageKeys, toJoin,
+    queue: rows, remaining, publishedThisWeek: published.length, publishedToday, messageKeys, toJoin,
     toReply: published.map((r) => ({ postId: r.p.id, code: r.p.code, communityName: r.name, postUrl: r.p.postUrl, publishedAt: r.p.publishedAt, clicks: r.p.clicks })),
   };
 }
