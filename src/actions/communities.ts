@@ -8,7 +8,6 @@ import { db } from "@/db";
 import { baseMessages, communities, communityPosts } from "@/db/schema";
 import { createCommunity, DISCARD_REASONS, PLATFORMS, reviewCommunity, setMembership, setPromoPolicy, type CommunityPlatform } from "@/domain/communities";
 import { createPost, eligibilityFor, markDeletedByAdmin, markPublished, skipPost, updatePostText } from "@/domain/community-posts";
-import { assertWeeklyQuota } from "@/domain/community-queue";
 import { registerInterested } from "@/domain/community-leads";
 import type { Actor } from "@/domain/leads";
 import { formAction, type ActionState } from "@/lib/action";
@@ -89,7 +88,6 @@ const _createPost = formAction(z.object({ communityId: id, baseMessageKey: messa
     refresh();
     return "Post generado";
   }
-  await assertWeeklyQuota(db, userId, new Date(), d.communityId);
   const post = await createPost(db, { communityId: d.communityId, baseMessageKey: d.baseMessageKey, publisherId: userId }, a);
   for (const e of existing) if (e.p.id !== post.id) await skipPost(db, e.p.id, "Cambió de mensaje antes de publicar", a);
   refresh();
@@ -199,7 +197,6 @@ export async function prepareCopyAndOpenAction(communityId: string, key: string)
       post = same.p;
     } else {
       // Si cambió de mensaje se crea primero el nuevo (puede fallar) y solo entonces se omite el anterior.
-      await assertWeeklyQuota(db, userId, new Date(), cid);
       post = await createPost(db, { communityId: cid, baseMessageKey, publisherId: userId }, a);
     }
     for (const e of existing) if (e.p.id !== post.id) await skipPost(db, e.p.id, "Cambió de mensaje antes de publicar", a);
