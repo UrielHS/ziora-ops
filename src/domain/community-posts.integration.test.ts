@@ -141,7 +141,7 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     const { db, community, pau, ale } = await setup();
     const { communities, communityMemberships, communityPosts } = await import("@/db/schema");
     const { createPost, markPublished } = await import("./community-posts");
-    const { loadPublisherView, weeklyPostsUsed, assertWeeklyQuota, WEEKLY_POSTS_PER_PUBLISHER } = await import("./community-queue");
+    const { loadPublisherView, weeklyPostsUsed, assertWeeklyQuota, WEEKLY_POSTS_PER_PUBLISHER, DAILY_POSTS_PER_PUBLISHER } = await import("./community-queue");
     const pauPost = await createPost(db, { communityId: community.id, baseMessageKey: "M1", publisherId: pau }, actor);
     const alePost = await createPost(db, { communityId: community.id, baseMessageKey: "M2", publisherId: ale }, actor);
     expect((await loadPublisherView(db, pau)).queue.map((r) => r.community.id)).toContain(community.id);
@@ -162,7 +162,7 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
 
     // Cupo semanal del lado del servidor: planeados y publicados de los últimos 7 días cuentan.
     const q = await setup();
-    for (let i = 0; i < WEEKLY_POSTS_PER_PUBLISHER; i++) {
+    for (let i = 0; i < DAILY_POSTS_PER_PUBLISHER; i++) {
       const [other] = await q.db.insert(communities).values({
         name: `Extra ${i} ${q.t}`, platform: "facebook", url: `https://fb.com/extra${i}${q.t}`, slug: `fb-extra-${i}-${q.t}`.slice(0, 60), status: "aprobada", promoPolicy: "si",
       }).returning();
@@ -170,8 +170,11 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
       await assertWeeklyQuota(q.db, q.pau);
       await createPost(q.db, { communityId: other.id, baseMessageKey: "M1", publisherId: q.pau }, actor);
     }
-    expect(await weeklyPostsUsed(q.db, q.pau)).toBe(WEEKLY_POSTS_PER_PUBLISHER);
-    await expect(assertWeeklyQuota(q.db, q.pau)).rejects.toThrow(/últimos 7 días/);
+    // 10 en 24 h llenan el tope diario; el semanal (15) aún tiene lugar, así que pasado mañana se puede seguir.
+    expect(await weeklyPostsUsed(q.db, q.pau)).toBe(DAILY_POSTS_PER_PUBLISHER);
+    expect(DAILY_POSTS_PER_PUBLISHER).toBeLessThan(WEEKLY_POSTS_PER_PUBLISHER);
+    await expect(assertWeeklyQuota(q.db, q.pau)).rejects.toThrow(/últimas 24 horas/);
+    await expect(assertWeeklyQuota(q.db, q.pau, new Date(Date.now() + 2 * 86_400_000))).resolves.toBeUndefined();
     await expect(assertWeeklyQuota(q.db, q.ale)).resolves.toBeUndefined();
   });
 

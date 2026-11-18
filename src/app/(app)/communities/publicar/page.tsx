@@ -2,7 +2,7 @@ import Link from "next/link";
 import { MembershipButtons, PostCard, PublishQueue } from "@/components/communities";
 import { Badge, btn, Card, PageHeader, PanelHeader } from "@/components/ui";
 import { db } from "@/db";
-import { loadPublisherView, WEEKLY_POSTS_PER_PUBLISHER } from "@/domain/community-queue";
+import { DAILY_POSTS_PER_PUBLISHER, loadPublisherView, WEEKLY_POSTS_PER_PUBLISHER } from "@/domain/community-queue";
 import { COMMUNITY_PLATFORM } from "@/lib/labels";
 import { requirePagePermission } from "@/lib/session";
 
@@ -18,14 +18,14 @@ export default async function PublishPage() {
       <PageHeader
         eyebrow="Marketing · Comunidades"
         title="Publicar"
-        subtitle={`Un clic copia el texto con tu liga y abre el grupo. Llevas ${v.publishedThisWeek} de ${WEEKLY_POSTS_PER_PUBLISHER} posts en los últimos 7 días.`}
+        subtitle={`Un clic copia el texto con tu liga y abre el grupo. Llevas ${v.publishedThisWeek} de ${WEEKLY_POSTS_PER_PUBLISHER} posts en los últimos 7 días (máximo ${DAILY_POSTS_PER_PUBLISHER} en 24 horas; hoy llevas ${v.publishedToday}).`}
         actions={<Link href="/communities" className={btn("ghost", "sm")}>Todas las comunidades</Link>}
       />
 
       <Card>
         <PanelHeader title="1 · Publicar" subtitle="Grupos donde ya estás dentro, permiten promoción y llevan más de 21 días sin post. Pega el texto en el grupo y vuelve aquí a marcarlo." />
         <div className="px-5 pb-5 pt-3">
-          <PublishQueue rows={v.queue} messageKeys={v.messageKeys} remaining={v.remaining} publishedThisWeek={v.publishedThisWeek} quota={WEEKLY_POSTS_PER_PUBLISHER} />
+          <PublishQueue rows={v.queue} messageKeys={v.messageKeys} remaining={v.remaining} publishedThisWeek={v.publishedThisWeek} quota={WEEKLY_POSTS_PER_PUBLISHER} publishedToday={v.publishedToday} dailyQuota={DAILY_POSTS_PER_PUBLISHER} />
         </div>
       </Card>
 
