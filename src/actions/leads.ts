@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { leadStatusEnum } from "@/db/schema";
 import {
-  assignOwner, convertLeadToAccount, logActivity, markReplied, markTrying, recordReferralLinkSent, recordTouch, setChannelInvalid, setLeadStatus, setNextAction, setPriority, type Actor,
+  assignOwner, convertLeadToAccount, startLead, logActivity, markReplied, markTrying, recordReferralLinkSent, recordTouch, setChannelInvalid, setLeadStatus, setNextAction, setPriority, type Actor,
 } from "@/domain/leads";
 import { completePendingTouch, enroll, enrollMessage } from "@/domain/sequences";
 import { formAction, type ActionState } from "@/lib/action";
@@ -152,6 +152,13 @@ const _convertToAccount = formAction(z.object({ id, name: z.string().trim().max(
   redirect(`/sales/accounts/${accountId}`);
 });
 
+const _addToLeads = formAction(z.object({ id, ownerId: z.uuid().optional() }), async (d) => {
+  const { added } = await startLead(db, d.id, d.ownerId ?? null, await actor());
+  refresh(d.id);
+  return added ? "Agregado a Leads en «Nuevo»." : "Ya estaba en Leads.";
+});
+
+export async function addToLeadsAction(prev: ActionState, fd: FormData) { return _addToLeads(prev, fd); }
 export async function setLeadStatusAction(prev: ActionState, fd: FormData) { return _setLeadStatus(prev, fd); }
 export async function recordTouchAction(prev: ActionState, fd: FormData) { return _recordTouch(prev, fd); }
 export async function markRepliedAction(prev: ActionState, fd: FormData) { return _markReplied(prev, fd); }
