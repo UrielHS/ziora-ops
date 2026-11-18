@@ -141,7 +141,7 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     const { db, community, pau, ale } = await setup();
     const { communities, communityMemberships, communityPosts } = await import("@/db/schema");
     const { createPost, markPublished } = await import("./community-posts");
-    const { loadPublisherView, weeklyPostsUsed, assertWeeklyQuota, WEEKLY_POSTS_PER_PUBLISHER, DAILY_POSTS_PER_PUBLISHER } = await import("./community-queue");
+    const { loadPublisherView, weeklyPostsUsed } = await import("./community-queue");
     const pauPost = await createPost(db, { communityId: community.id, baseMessageKey: "M1", publisherId: pau }, actor);
     const alePost = await createPost(db, { communityId: community.id, baseMessageKey: "M2", publisherId: ale }, actor);
     expect((await loadPublisherView(db, pau)).queue.map((r) => r.community.id)).toContain(community.id);
@@ -160,22 +160,17 @@ describe.runIf(enabled)("comunidades: posts, liga y clics", () => {
     await s.db.update(communities).set({ promoPolicy: "no" }).where(eq(communities.id, s.community.id));
     await expect(markPublished(s.db, p.id, {}, actor)).rejects.toThrow(/promoción/);
 
-    // Cupo semanal del lado del servidor: planeados y publicados de los últimos 7 días cuentan.
+    // Sin tope de posts (Chris, 18-nov-2026): 20 posts seguidos en grupos distintos se generan y todos salen en la cola.
     const q = await setup();
-    for (let i = 0; i < DAILY_POSTS_PER_PUBLISHER; i++) {
+    for (let i = 0; i < 20; i++) {
       const [other] = await q.db.insert(communities).values({
         name: `Extra ${i} ${q.t}`, platform: "facebook", url: `https://fb.com/extra${i}${q.t}`, slug: `fb-extra-${i}-${q.t}`.slice(0, 60), status: "aprobada", promoPolicy: "si",
       }).returning();
       await q.db.insert(communityMemberships).values({ communityId: other.id, userId: q.pau, status: "unida" });
-      await assertWeeklyQuota(q.db, q.pau);
       await createPost(q.db, { communityId: other.id, baseMessageKey: "M1", publisherId: q.pau }, actor);
     }
-    // 10 en 24 h llenan el tope diario; el semanal (15) aún tiene lugar, así que pasado mañana se puede seguir.
-    expect(await weeklyPostsUsed(q.db, q.pau)).toBe(DAILY_POSTS_PER_PUBLISHER);
-    expect(DAILY_POSTS_PER_PUBLISHER).toBeLessThan(WEEKLY_POSTS_PER_PUBLISHER);
-    await expect(assertWeeklyQuota(q.db, q.pau)).rejects.toThrow(/últimas 24 horas/);
-    await expect(assertWeeklyQuota(q.db, q.pau, new Date(Date.now() + 2 * 86_400_000))).resolves.toBeUndefined();
-    await expect(assertWeeklyQuota(q.db, q.ale)).resolves.toBeUndefined();
+    expect(await weeklyPostsUsed(q.db, q.pau)).toBe(20);
+    expect((await loadPublisherView(q.db, q.pau)).queue.filter((r) => r.planned).length).toBe(20);
   });
 
   it("el cupo cuenta solo planeados elegibles y borrar por el admin exige post publicado", async () => {

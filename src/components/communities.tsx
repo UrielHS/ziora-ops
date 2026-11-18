@@ -343,17 +343,11 @@ function PublishItem({ row, messageKeys }: { row: PublishRow; messageKeys: strin
 }
 
 /** Bloque «Publicar» de /communities/publicar. */
-export function PublishQueue({ rows, messageKeys, remaining, publishedThisWeek, quota, publishedToday = 0, dailyQuota = Infinity }: {
-  rows: PublishRow[]; messageKeys: string[]; remaining: number; publishedThisWeek: number; quota: number; publishedToday?: number; dailyQuota?: number;
-}) {
+export function PublishQueue({ rows, messageKeys }: { rows: PublishRow[]; messageKeys: string[] }) {
   if (!rows.length) {
     return (
       <p className="rounded-2xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">
-        {remaining === 0 && publishedThisWeek >= quota
-          ? `Ya completaste tus ${quota} posts de los últimos 7 días.`
-          : remaining === 0 && publishedToday >= dailyQuota
-            ? `Ya publicaste ${dailyQuota} posts en las últimas 24 horas. Vuelve mañana.`
-            : "Ahora no hay grupos listos para publicar. Únete a más grupos o registra su política de promoción."}
+        Ahora no hay grupos listos para publicar. Únete a más grupos o registra su política de promoción.
       </p>
     );
   }
