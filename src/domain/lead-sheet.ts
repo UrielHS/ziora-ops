@@ -3,6 +3,10 @@
  * Rol, Pacientes/sem, Enfoque, Documentación, Usa IA, Ciudad, Asistió Panel, Asistió Taller y Ticket Panel.
  * Los encabezados se reconocen sin importar mayúsculas, acentos o espacios; cualquier otra columna se ignora.
  * Una fila entra con correo o con teléfono válido (los dos son opcionales, pero hace falta uno).
+ *
+ * También entiende el CSV que descarga el Centro de clientes potenciales de Meta (formularios instantáneos):
+ * full_name, email, phone_number ("p:+52…"), las cuatro preguntas del formulario de psicólogos y los datos
+ * de campaña (campaign_name, adset_name, ad_name, form_name, platform, created_time), que quedan en details.meta.
  */
 import type { Db } from "@/db";
 import type { ContactTag } from "@/db/schema";
@@ -14,17 +18,18 @@ import { normalizePhoneE164 } from "./phone";
 
 type Field =
   | "name" | "email" | "phone" | "jobTitle" | "patientsPerWeek" | "approach" | "documentation" | "aiUsage" | "cityName"
-  | "priority" | "segment" | "b2bFlag" | "attendedPanel" | "attendedWorkshop" | "ticketPanel";
+  | "priority" | "segment" | "b2bFlag" | "attendedPanel" | "attendedWorkshop" | "ticketPanel"
+  | "metaCreated" | "metaCampaign" | "metaAdset" | "metaAd" | "metaForm" | "metaPlatform";
 
 const ALIASES: Record<Field, string[]> = {
-  name: ["nombre", "name", "nombre-completo"],
+  name: ["nombre", "name", "nombre-completo", "full-name"],
   email: ["email", "correo", "correo-electronico", "e-mail"],
-  phone: ["telefono", "phone", "whatsapp", "celular"],
-  jobTitle: ["rol", "role", "puesto"],
-  patientsPerWeek: ["pacientes-sem", "pacientes-por-semana", "pacientes"],
+  phone: ["telefono", "phone", "whatsapp", "celular", "phone-number", "numero-de-telefono"],
+  jobTitle: ["rol", "role", "puesto", "cual-es-tu-puesto"],
+  patientsPerWeek: ["pacientes-sem", "pacientes-por-semana", "pacientes", "cuantos-pacientes-atiendes-por-semana"],
   approach: ["enfoque"],
-  documentation: ["documentacion"],
-  aiUsage: ["usa-ia", "uso-de-ia"],
+  documentation: ["documentacion", "como-documentas-hoy-tus-sesiones"],
+  aiUsage: ["usa-ia", "uso-de-ia", "usas-ia-en-tu-practica"],
   cityName: ["ciudad", "city"],
   priority: ["prioridad", "priority"],
   segment: ["segmento", "segment"],
@@ -32,6 +37,12 @@ const ALIASES: Record<Field, string[]> = {
   attendedPanel: ["asistio-panel"],
   attendedWorkshop: ["asistio-taller"],
   ticketPanel: ["ticket-panel"],
+  metaCreated: ["created-time"],
+  metaCampaign: ["campaign-name"],
+  metaAdset: ["adset-name"],
+  metaAd: ["ad-name"],
+  metaForm: ["form-name"],
+  metaPlatform: ["platform"],
 };
 
 /** Columnas que se importan, en el orden de la hoja. */
@@ -53,12 +64,17 @@ export type LeadRow = {
   segment?: string; // "HOT", "WARM-A", "COLD-Virtual"… sin emoji
   b2bFlag?: string; // "Director"… sin emoji
   eventos?: { panel: boolean; taller: boolean; ticketPanel?: string };
+  /** Datos de campaña cuando la fila viene de un formulario instantáneo de Meta. */
+  meta?: { createdTime?: string; campaign?: string; adset?: string; ad?: string; form?: string; platform?: string };
 };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Quita emojis y símbolos decorativos de la hoja ("🔥 HOT" → "HOT"). */
 const clean = (s?: string) => s?.replace(/[^\p{L}\p{N}\s\-()./]/gu, "").replace(/\s+/g, " ").trim() || undefined;
+/** Meta antepone el tipo a algunos valores ("p:+52…", "c:120…") y usa "_" en lugar de espacios en las respuestas. */
+const metaValue = (s?: string) => s?.replace(/^(p|l|c|as|ag|f|ad):/, "").trim() || undefined;
+const metaAnswer = (s?: string) => metaValue(s)?.replace(/_/g, " ").replace(/\s+/g, " ").trim() || undefined;
 const yes = (s?: string) => /^(s[ií]|yes|true|1|x)$/i.test((s ?? "").trim());
 /** La hoja usa 1..5; aquí se agrupa en HOT (1), WARM (2) y COLD (3 o más). */
 const toPriority = (s?: string) => {
@@ -68,6 +84,7 @@ const toPriority = (s?: string) => {
 
 export function parseLeadSheet(text: string) {
   const [header, ...data] = parseCsv(text);
+  if (header) header.forEach((h, i) => { header[i] = h.replace(/^\uFEFF/, "").replace(/^["']|["']$/g, ""); });
   if (!header) throw new Error("El archivo está vacío.");
   const keys = header.map((h) => slug(h));
   const col = {} as Partial<Record<Field, number>>;
@@ -91,7 +108,9 @@ export function parseLeadSheet(text: string) {
     const rawEmail = get("email");
     const email = rawEmail ? normalizeEmail(rawEmail) : undefined;
     if (email && !EMAIL.test(email)) return skipped.push({ line, reason: `correo inválido (${email})` });
-    const phone = get("phone");
+    const isMeta = col.metaForm !== undefined || col.metaCampaign !== undefined;
+    const answer = (f: Field) => (isMeta ? metaAnswer(get(f)) : get(f));
+    const phone = isMeta ? metaValue(get("phone")) : get("phone");
     const phoneE164 = normalizePhoneE164(phone) ?? undefined;
     if (!email && !phoneE164) return skipped.push({ line, reason: "sin correo ni teléfono válido" });
     if (email && seenEmail.has(email)) return skipped.push({ line, reason: `correo repetido en la hoja (${email})` });
@@ -99,11 +118,15 @@ export function parseLeadSheet(text: string) {
     if (email) seenEmail.add(email);
     if (phoneE164) seenPhone.add(phoneE164);
     rows.push({
-      line, email, phone, phoneE164, name: get("name") ?? email ?? phoneE164!, jobTitle: get("jobTitle"),
-      patientsPerWeek: get("patientsPerWeek"), approach: get("approach"), documentation: get("documentation"),
-      aiUsage: get("aiUsage"), cityName: get("cityName"),
+      line, email, phone, phoneE164, name: get("name") ?? email ?? phoneE164!, jobTitle: answer("jobTitle"),
+      patientsPerWeek: answer("patientsPerWeek"), approach: get("approach"), documentation: answer("documentation"),
+      aiUsage: answer("aiUsage"), cityName: get("cityName"),
       priority: toPriority(get("priority")), segment: clean(get("segment")), b2bFlag: clean(get("b2bFlag")),
       eventos: hasEventos ? { panel: yes(get("attendedPanel")), taller: yes(get("attendedWorkshop")), ticketPanel: get("ticketPanel") } : undefined,
+      meta: isMeta ? {
+        createdTime: get("metaCreated"), campaign: metaValue(get("metaCampaign")), adset: metaValue(get("metaAdset")),
+        ad: metaValue(get("metaAd")), form: metaValue(get("metaForm")), platform: metaValue(get("metaPlatform")),
+      } : undefined,
     });
   });
   return { rows, skipped, ignoredColumns };
@@ -122,7 +145,7 @@ export type ImportLeadOptions = {
   /** Dueño que se asigna a los leads nuevos (los que ya tenían dueño lo conservan). */
   ownerId?: string | null;
   /** Base legal del contacto. "evento_luma" registra consentimiento de correo y WhatsApp por el registro al evento. */
-  consentSource?: "evento_luma" | null;
+  consentSource?: "evento_luma" | "formulario_meta" | null;
   /** Secuencia en la que se enrola a todos los de la hoja (creados y completados); `enroll` omite a los que no están en nuevo/contactado. */
   sequenceId?: string | null;
   /** Quién importa; queda en la actividad "Enrolado en…". */
@@ -130,6 +153,7 @@ export type ImportLeadOptions = {
 };
 
 const LUMA_EVIDENCE = "Registro en Luma · Mexico Tech Week 2026 (panel 26-oct / taller 30-oct)";
+const META_EVIDENCE = "Formulario instantáneo de Meta · casilla de permiso para contacto por correo y WhatsApp";
 
 /** Crea o completa cada lead (por correo o, si no hay, por teléfono). Nunca duplica ni pisa datos que ya existían. */
 export async function importLeadSheet(db: Db, rows: LeadRow[], opts: ImportLeadOptions = {}) {
@@ -137,11 +161,14 @@ export async function importLeadSheet(db: Db, rows: LeadRow[], opts: ImportLeadO
   const ids: string[] = [];
   const consents = opts.consentSource === "evento_luma"
     ? (["email", "whatsapp"] as const).map((channel) => ({ channel, source: "evento_luma", evidence: LUMA_EVIDENCE }))
-    : [];
+    : opts.consentSource === "formulario_meta"
+      ? (["email", "whatsapp"] as const).map((channel) => ({ channel, source: "formulario_meta", evidence: META_EVIDENCE }))
+      : [];
   for (const r of rows) {
     const details: Record<string, unknown> = {};
     if (r.eventos) details.eventos = r.eventos;
     if (r.b2bFlag) details.flagB2B = r.b2bFlag;
+    if (r.meta) details.meta = r.meta;
     const res = await upsertContact(db, {
       name: r.name, email: r.email, phone: r.phone, phoneE164: r.phoneE164, jobTitle: r.jobTitle, city: toCity(r.cityName), cityName: r.cityName,
       patientsPerWeek: r.patientsPerWeek, approach: r.approach, documentation: r.documentation, aiUsage: r.aiUsage,

@@ -86,16 +86,23 @@ const _importEventOps = formAction(
 );
 
 const MAX_CSV = 5 * 1024 * 1024;
+/** El CSV del Centro de clientes potenciales de Meta llega en UTF-16; el resto, en UTF-8. */
+function decodeCsv(buf: ArrayBuffer) {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder("utf-16le").decode(buf);
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder("utf-16be").decode(buf);
+  return new TextDecoder("utf-8").decode(buf);
+}
 const _importLeads = formAction(
   z.object({
     file: z.instanceof(File, { message: "elige el CSV de la hoja" }).refine((f) => f.size > 0 && f.size <= MAX_CSV, "el CSV debe pesar menos de 5 MB"),
-    consentSource: z.enum(["evento_luma"]).optional(),
+    consentSource: z.enum(["evento_luma", "formulario_meta"]).optional(),
     ownerId: z.uuid().optional(),
     sequenceId: z.uuid().optional(),
   }),
   async ({ file, consentSource, ownerId, sequenceId }) => {
     const { user } = await requirePermission("contacts.import");
-    const { rows, skipped } = parseLeadSheet(await file.text());
+    const { rows, skipped } = parseLeadSheet(decodeCsv(await file.arrayBuffer()));
     if (!rows.length) throw new Error("No encontré filas con correo o teléfono válido.");
     const r = await importLeadSheet(db, rows, {
       consentSource: consentSource ?? null, ownerId: ownerId ?? null, sequenceId: sequenceId ?? null, actor: { userId: user.id, label: user.name },

@@ -58,7 +58,9 @@ export function attributeDemos(
 export function parseCsv(text: string): string[][] {
   const src = text.replace(/^﻿/, "");
   const firstLine = src.split(/\r?\n/, 1)[0] ?? "";
-  const sep = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
+  const count = (re: RegExp) => firstLine.match(re)?.length ?? 0;
+  // Coma por defecto; punto y coma o tabulador (CSV de Meta) cuando dominan en la primera línea.
+  const sep = count(/\t/g) > Math.max(count(/;/g), count(/,/g)) ? "\t" : count(/;/g) > count(/,/g) ? ";" : ",";
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";

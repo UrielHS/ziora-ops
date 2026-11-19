@@ -103,9 +103,9 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
                 Basta con correo o teléfono.
               </p>
               <p className="text-xs text-faint">Si el contacto ya existe (mismo correo o teléfono), solo se completan los datos que falten. Nada de esto pasa a Event Ops.</p>
-              <Field label="Archivo CSV"><input type="file" name="file" accept=".csv,text/csv" required className="text-sm" /></Field>
+              <Field label="Archivo CSV"><input type="file" name="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required className="text-sm" /></Field>
               <Field label="Base de consentimiento" hint="Con qué permiso los contactamos. Sin base no entran a campañas ni cadencias.">
-                <Select name="consentSource" placeholder="Sin base de consentimiento" options={[["evento_luma", "Registro en Luma (Mexico Tech Week)"]]} />
+                <Select name="consentSource" placeholder="Sin base de consentimiento" options={[["evento_luma", "Registro en Luma (Mexico Tech Week)"], ["formulario_meta", "Formulario de Meta (casilla de permiso)"]]} />
               </Field>
               <Field label="Dueño de los leads nuevos">
                 <Select name="ownerId" placeholder="Sin dueño" options={userOptions(users)} />
