@@ -41,6 +41,8 @@ export const SnapshotUser = z.strictObject({
   feedbackCount: z.number().int().min(0).optional(),
   sessionsTotal: z.number().int().min(0).optional(),
   notesTotal: z.number().int().min(0).optional(),
+  // Fecha de la primera nota del terapeuta (opcional; versiones de la app que no la mandan siguen siendo válidas).
+  firstNoteAt: z.iso.datetime({ offset: true }).nullable().optional(),
 });
 export const Snapshot = z.strictObject({
   generatedAt: z.iso.datetime({ offset: true }),
@@ -195,6 +197,7 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
     attribution: (u.attribution ?? {}) as Record<string, string>, trialKind: u.trialKind ?? null,
     hasPaidInvoice: u.hasPaidInvoice ?? null,
     feedbackCount: u.feedbackCount ?? 0, sessionsTotal: u.sessionsTotal ?? 0, notesTotal: u.notesTotal ?? 0,
+    firstNoteAt: toDate(u.firstNoteAt),
     isTest: looksLikeTestAccount(u.email),
     syncedAt: now, removedAt: null,
   }));
@@ -217,6 +220,8 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
           attribution: sql`case when excluded.attribution = '{}'::jsonb then app_users.attribution else excluded.attribution end`,
           trialKind: sql`coalesce(excluded.trial_kind, app_users.trial_kind)`,
           hasPaidInvoice: sql`coalesce(excluded.has_paid_invoice, app_users.has_paid_invoice)`,
+          // La primera nota solo puede quedarse igual o moverse hacia atrás; null no borra la guardada.
+          firstNoteAt: sql`least(app_users.first_note_at, excluded.first_note_at)`,
           ...(v2 ? { feedbackCount: sql`excluded.feedback_count`, sessionsTotal: sql`excluded.sessions_total`, notesTotal: sql`excluded.notes_total` } : {}),
           // La marca de prueba solo sube: la pone el equipo o la detección por correo, y nadie la quita al sincronizar.
           isTest: sql`app_users.is_test or excluded.is_test`,
@@ -244,4 +249,46 @@ export async function applySnapshot(db: Db, snap: Snapshot, now = new Date()) {
   }
   const removed = (await db.select({ uid: appUsers.uid }).from(appUsers).where(eq(appUsers.removedAt, now))).length;
   return { users: rows.length, removed, plans: summary.length };
+}
+
+export const ACTIVATION_HOURS = 72;
+const HOUR = 3_600_000;
+
+export type ActivationUser = { signedUpAt: Date | null; firstNoteAt: Date | null; notesTotal: number };
+
+/**
+ * Primera nota en 72 h. Solo cuentan quienes se registraron hace 72 h o más (antes no se sabe todavía).
+ * `known` = cuántos de ellos ya traen fecha de primera nota o no tienen notas: mientras la app no mande
+ * firstNoteAt, quien tiene notas sin fecha no se puede clasificar y queda fuera del porcentaje.
+ */
+export function activation72h(users: ActivationUser[], now: Date) {
+  let eligible = 0, within = 0, known = 0, waiting = 0;
+  for (const u of users) {
+    if (!u.signedUpAt) continue;
+    if (now.getTime() - u.signedUpAt.getTime() < ACTIVATION_HOURS * HOUR) { waiting++; continue; }
+    eligible++;
+    if (u.firstNoteAt) {
+      known++;
+      if (u.firstNoteAt.getTime() - u.signedUpAt.getTime() <= ACTIVATION_HOURS * HOUR) within++;
+    } else if (u.notesTotal === 0) known++;
+  }
+  return { eligible, within, known, waiting };
+}
+
+export type Origin = "redes" | "comunidad" | "vendedor" | "anuncios" | "otro" | "sin_origen";
+export const ORIGIN_LABEL: Record<Origin, string> = {
+  redes: "Redes (orgánico)", comunidad: "Comunidades", vendedor: "Vendedor (liga personal)",
+  anuncios: "Anuncios", otro: "Otro UTM", sin_origen: "Sin origen",
+};
+
+/** De dónde llegó el registro, según la atribución que manda la app y las ligas de Ops. */
+export function originOf(u: { attribution: Record<string, string> | null; socialLinkId?: string | null; communityId?: string | null; referredByCode?: string | null }): Origin {
+  const a = u.attribution ?? {};
+  const medium = (a.utm_medium ?? "").toLowerCase();
+  if (u.communityId || medium === "comunidad") return "comunidad";
+  if (u.socialLinkId || medium === "redes") return "redes";
+  if (medium === "vendedor" || u.referredByCode) return "vendedor";
+  if (["paid", "cpc", "ads", "anuncio", "anuncios", "paid_social"].includes(medium) || a.gclid || a.fbclid) return "anuncios";
+  if (Object.keys(a).length > 0) return "otro";
+  return "sin_origen";
 }

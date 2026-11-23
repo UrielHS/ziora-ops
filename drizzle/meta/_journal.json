@@ -127,6 +127,13 @@
       "when": 1794510166581,
       "tag": "0017_leads_redes",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795459349606,
+      "tag": "0018_primera_nota",
+      "breakpoints": true
     }
   ]
 }
