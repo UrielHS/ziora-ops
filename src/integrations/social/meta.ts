@@ -110,10 +110,28 @@ export async function syncInstagram(igUserId: string, token: string, days: strin
   return { daily: [...map.values()], posts, ads: [], campaignMeta: {}, warnings };
 }
 
-/** Página de Facebook: requiere token de página (o de usuario del sistema con acceso a la página). */
-export async function syncFacebookPage(pageId: string, token: string, days: string[], today: string): Promise<MetaSync> {
+/**
+ * Las métricas de página (/{page}/insights) exigen un token DE PÁGINA. Con el token del usuario del sistema
+ * se pide el de la página (requiere que la página esté asignada a ese usuario). Si no se puede, se usa el original
+ * y el error de Meta queda como aviso.
+ */
+export async function pageAccessToken(pageId: string, token: string): Promise<{ token: string; warning?: string }> {
+  try {
+    const r = await graph(pageId, token, { fields: "access_token" });
+    if (typeof r.access_token === "string" && r.access_token) return { token: r.access_token };
+    return { token, warning: "Meta no devolvió token de página: asigna la página al usuario del sistema (control total)." };
+  } catch (e) {
+    return { token, warning: `token de página: ${(e as Error).message}` };
+  }
+}
+
+/** Página de Facebook: con el token del usuario del sistema se obtiene el de la página. */
+export async function syncFacebookPage(pageId: string, systemToken: string, days: string[], today: string): Promise<MetaSync> {
   const warnings: string[] = [];
   const map = new Map<string, OrganicRow>();
+  const pt = await pageAccessToken(pageId, systemToken);
+  const token = pt.token;
+  if (pt.warning) warnings.push(pt.warning);
   try {
     const p = await graph(pageId, token, { fields: "followers_count" });
     rowFor(map, today).followers = Number(p.followers_count ?? 0);
