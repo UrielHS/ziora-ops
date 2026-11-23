@@ -19,6 +19,19 @@ describeDb("usuarios de la app y seguimiento 1:1", async () => {
     uid: `${id}-${tag}`, email: `${id}-${tag}@example.com`, plan: `pro${tag}`, status: "active", patientCount: 5, sessionsLast30d: 10, lastActiveAt: iso(1), ...extra,
   });
 
+  it("guarda la primera nota más antigua y no la borra con null", async () => {
+    const base = { generatedAt: now.toISOString(), users: [u("nota", { createdAt: iso(5), firstNoteAt: iso(3), notesTotal: 2 })] };
+    await applySnapshot(db, base, now);
+    const read = async () => (await db.select({ f: appUsers.firstNoteAt }).from(appUsers).where(eq(appUsers.uid, `nota-${tag}`)))[0].f;
+    expect((await read())?.toISOString()).toBe(iso(3));
+    await applySnapshot(db, { ...base, users: [u("nota", { createdAt: iso(5), firstNoteAt: null, notesTotal: 2 })] }, now);
+    expect((await read())?.toISOString()).toBe(iso(3));
+    await applySnapshot(db, { ...base, users: [u("nota", { createdAt: iso(5), firstNoteAt: iso(4), notesTotal: 2 })] }, now);
+    expect((await read())?.toISOString()).toBe(iso(4));
+    await applySnapshot(db, { ...base, users: [u("nota", { createdAt: iso(5), firstNoteAt: iso(1), notesTotal: 2 })] }, now);
+    expect((await read())?.toISOString()).toBe(iso(4));
+  });
+
   it("aplica el snapshot, marca bajas, guarda la foto diaria y sugiere seguimientos sin duplicar", async () => {
     await db.insert(planPrices).values({ plan: `pro${tag}`, label: "Pro", priceMxn: 590 }).onConflictDoNothing();
     const first = { generatedAt: now.toISOString(), users: [

@@ -5,6 +5,7 @@ import { Card, cn, PageHeader, PanelHeader, Progress } from "@/components/ui";
 import { db } from "@/db";
 import { goalsWithValues, gtmDay, gtmPhase } from "@/db/goals";
 import { appUsers, bugs, campaignSends, contentPieces, demoRequests } from "@/db/schema";
+import { activation72h, ORIGIN_LABEL, originOf, type Origin } from "@/domain/app-users";
 import { pct } from "@/lib/format";
 import { CONTENT_PILLAR, DEMO_STAGE } from "@/lib/labels";
 
@@ -14,7 +15,8 @@ export default async function MetricsPage() {
   const day = gtmDay();
   const phase = gtmPhase(day);
   const since = new Date(Date.now() - 56 * 86400000);
-  const [goals, stages, weekly, pillars, sends, bugFlow, [act]] = await Promise.all([
+  const since30 = new Date(Date.now() - 30 * 86400000);
+  const [goals, stages, weekly, pillars, sends, bugFlow, [act], recent] = await Promise.all([
     goalsWithValues(),
     db.select({ stage: demoRequests.stage, n: count() }).from(demoRequests).groupBy(demoRequests.stage),
     db.select({ wk: sql<string>`to_char(date_trunc('week', ${demoRequests.createdAt} at time zone 'America/Mexico_City'), 'YYYY-MM-DD')`, n: count() })
@@ -22,14 +24,29 @@ export default async function MetricsPage() {
     db.select({ pillar: contentPieces.pillar, n: count() }).from(contentPieces).where(eq(contentPieces.status, "published")).groupBy(contentPieces.pillar),
     db.select({ status: campaignSends.status, n: count() }).from(campaignSends).groupBy(campaignSends.status),
     db.select({ open: sql<number>`count(*) filter (where ${bugs.status} in ('new','triaged','in_progress'))::int`, fixed: sql<number>`count(*) filter (where ${bugs.status} in ('fixed','verified'))::int` }).from(bugs),
-    // Activación (aproximada): usuarios reales con al menos una nota. La regla de 72 h necesita que la app mande la fecha de la primera nota.
+    // Activación: usuarios reales con al menos una nota.
     db.select({
       users: sql<number>`count(*)::int`,
       activated: sql<number>`count(*) filter (where ${appUsers.notesTotal} > 0)::int`,
       newWeek: sql<number>`count(*) filter (where ${appUsers.signedUpAt} >= now() - interval '7 days')::int`,
       newWeekActivated: sql<number>`count(*) filter (where ${appUsers.signedUpAt} >= now() - interval '7 days' and ${appUsers.notesTotal} > 0)::int`,
     }).from(appUsers).where(and(eq(appUsers.isTest, false), isNull(appUsers.removedAt))),
+    // Registros de los últimos 30 días: primera nota en 72 h y origen.
+    db.select({
+      signedUpAt: appUsers.signedUpAt, firstNoteAt: appUsers.firstNoteAt, notesTotal: appUsers.notesTotal,
+      attribution: appUsers.attribution, socialLinkId: appUsers.socialLinkId, communityId: appUsers.communityId, referredByCode: appUsers.referredByCode,
+    }).from(appUsers).where(and(eq(appUsers.isTest, false), isNull(appUsers.removedAt), gte(appUsers.signedUpAt, since30))),
   ]);
+  const a72 = activation72h(recent, new Date());
+  const byOrigin = new Map<Origin, { n: number; activated: number }>();
+  for (const u of recent) {
+    const o = originOf(u);
+    const row = byOrigin.get(o) ?? { n: 0, activated: 0 };
+    row.n++;
+    if (u.notesTotal > 0) row.activated++;
+    byOrigin.set(o, row);
+  }
+  const origins = [...byOrigin.entries()].sort((x, y) => y[1].n - x[1].n);
   const weeks = Array.from({ length: 8 }, (_, i) => {
     const d = new Date(Date.now() - (7 - i) * 7 * 86400000);
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
@@ -138,7 +155,7 @@ export default async function MetricsPage() {
         </Card>
         <Card className="p-5">
           <p className="label">Activación de usuarios</p>
-          <p className="mt-1 text-[11px] text-muted">Activado = hizo al menos una nota en Ziora. Sin cuentas de prueba. La regla de «primera nota en 72 h» queda pendiente de que la app mande la fecha de la primera nota.</p>
+          <p className="mt-1 text-[11px] text-muted">Activado = hizo al menos una nota en Ziora. Sin cuentas de prueba.</p>
           <div className="mt-3 grid grid-cols-2 gap-4">
             {[
               ["Usuarios activados", `${act.activated} de ${act.users}`], ["Tasa de activación", `${pct(act.activated, act.users)}%`],
@@ -146,6 +163,33 @@ export default async function MetricsPage() {
             ].map(([l, v]) => (
               <div key={l as string}><p className="text-2xl font-extrabold">{v}</p><p className="text-[11px] text-muted">{l}</p></div>
             ))}
+          </div>
+          <div className="mt-4 border-t border-line pt-3">
+            <p className="text-sm font-semibold">Primera nota en 72 h · registros de 30 días</p>
+            {a72.known > 0 ? (
+              <p className="mt-1 text-2xl font-extrabold">{a72.within} de {a72.known} · {pct(a72.within, a72.known)}%</p>
+            ) : (
+              <p className="mt-1 text-xs text-muted">Sin datos todavía: la app aún no manda la fecha de la primera nota (firstNoteAt).</p>
+            )}
+            <p className="text-[11px] text-muted">
+              {a72.eligible} se registraron hace 72 h o más{a72.eligible > a72.known ? ` (${a72.eligible - a72.known} con notas pero sin fecha)` : ""} · {a72.waiting} siguen dentro de sus primeras 72 h.
+            </p>
+          </div>
+          <div className="mt-4 border-t border-line pt-3">
+            <p className="text-sm font-semibold">Registros por origen · 30 días</p>
+            {origins.length === 0 ? (
+              <p className="mt-1 text-xs text-muted">Sin registros en los últimos 30 días.</p>
+            ) : (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {origins.map(([o, r]) => (
+                  <li key={o} className="flex items-center justify-between gap-3 text-sm">
+                    <span>{ORIGIN_LABEL[o]}</span>
+                    <span className="text-muted"><b className="text-ink">{r.n}</b> registros · {r.activated} activados ({pct(r.activated, r.n)}%)</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-[11px] text-faint">El origen sale de los UTM con los que llegó a la app (utm_medium: redes, comunidad, vendedor) y de las ligas de Ops.</p>
           </div>
         </Card>
       </div>

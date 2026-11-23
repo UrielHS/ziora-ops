@@ -95,7 +95,7 @@ X-Ops-Signature: 3f1c…(hex)
 | `requestedAt` con más de 5 minutos de antigüedad o más de 1 minuto en el futuro | `401` (evita repeticiones) |
 | Correcta | `200` con el snapshot |
 
-- Versión 2: Ops manda `"v": 2` en el cuerpo (exactamente el entero 2). Solo entonces el usuario trae, además, `attribution` (objeto con `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `gclid`, `fbclid`, `ref`, texto ≤ 200, o `null`), `trialKind` (`"community"` o `null`), `hasPaidInvoice` (booleano: alguna suscripción con factura pagada > 0), `feedbackCount`, `sessionsTotal` y `notesTotal` (enteros ≥ 0). Sin `v: 2` la respuesta es idéntica a la v1. Ops guarda `attribution` y `trialKind` de forma permanente (null o vacío no los borran) y liga al usuario con su comunidad/post por `utm_term` (código del post) o `utm_content` (slug de la comunidad). Contrato completo en `ziora-gcp/docs/ZIORA-OPS-INTEGRACION.md`.
+- Versión 2: Ops manda `"v": 2` en el cuerpo (exactamente el entero 2). Solo entonces el usuario trae, además, `attribution` (objeto con `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `gclid`, `fbclid`, `ref`, texto ≤ 200, o `null`), `trialKind` (`"community"` o `null`), `hasPaidInvoice` (booleano: alguna suscripción con factura pagada > 0), `feedbackCount`, `sessionsTotal` y `notesTotal` (enteros ≥ 0) y, opcional, `firstNoteAt` (ISO 8601 con zona: fecha de la primera nota clínica del terapeuta, o `null` si no ha hecho ninguna). Ops guarda la fecha más antigua que reciba y con ella mide la activación «primera nota en 72 h» desde `createdAt`. Sin `v: 2` la respuesta es idéntica a la v1. Ops guarda `attribution` y `trialKind` de forma permanente (null o vacío no los borran) y liga al usuario con su comunidad/post por `utm_term` (código del post) o `utm_content` (slug de la comunidad). Contrato completo en `ziora-gcp/docs/ZIORA-OPS-INTEGRACION.md`.
 - Sin sesión de usuario ni CORS. El endpoint no aparece en la documentación pública ni en OpenAPI.
 - Si el repo tiene rate limiting global, exceptúa esta ruta o dale un límite propio (1 petición por minuto basta).
 
@@ -268,3 +268,15 @@ Guarda los UTM de la URL cuando la persona llega a la landing (por ejemplo, en `
    - una solicitud de ayuda de prueba;
    - una demo de prueba.
 3. Uriel conecta Ziora Ops y confirma que los datos llegaron. Después se repite en producción.
+
+### Atribución: cómo debe capturarla la app
+
+Ops reconoce el origen de cada registro por `attribution.utm_medium`: `redes` (Página de Facebook, Instagram, reels, mensaje automático), `comunidad` (grupos), `vendedor` (ligas personales del equipo). Para que llegue:
+
+1. Al abrir cualquier página de app.ziora-copilot.com, si la URL trae `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `fbclid`, `gclid` o `ref`, guardarlos (primer toque) en `localStorage` o una cookie de 30 días. No sobrescribir si ya hay valores.
+2. Al crear la cuenta, copiar esos valores al documento del usuario (por ejemplo `users/{uid}.attribution`) una sola vez.
+3. En `/ops/snapshot` v2, mandarlos tal cual en `attribution` (solo esas llaves, texto ≤ 200).
+4. `firstNoteAt`: fecha de la primera nota del terapeuta (el `createdAt` de su nota más antigua). Basta calcularla una vez y guardarla en el usuario.
+
+Ligas que ya usa la Página (noviembre 2026): `utm_source=facebook|instagram`, `utm_medium=redes`, `utm_campaign=pagina-fb|reels`, `utm_content=boton-registrarte|post-fijado|bienvenida|comenta-nota`.
+

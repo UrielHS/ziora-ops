@@ -713,6 +713,8 @@ export const appUsers = ops.table(
     feedbackCount: integer("feedback_count").notNull().default(0),
     sessionsTotal: integer("sessions_total").notNull().default(0),
     notesTotal: integer("notes_total").notNull().default(0),
+    // Primera nota clínica que hizo (snapshot v2, opcional). Mide la activación en 72 h desde el registro.
+    firstNoteAt: timestamp("first_note_at", { withTimezone: true }),
     socialLinkId: uuid("social_link_id").references((): AnyPgColumn => socialLinks.id, { onDelete: "set null" }),
   },
   (t) => [index("app_users_social_link_idx").on(t.socialLinkId), index("app_users_plan_idx").on(t.plan), uniqueIndex("app_users_email_unique").on(t.email), index("app_users_referred_by_code_idx").on(t.referredByCode)],
